@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"time"
+	"log"
 
 	"github.com/go-chi/chi/v5"
 
@@ -89,10 +90,11 @@ func (h *POHandler) Export(w http.ResponseWriter, r *http.Request) {
 	}
 
 	path, cacheHit, err := h.exportService.GetOrGenerate(r.Context(), filter)
-	if err != nil {
-		utils.Error(w, http.StatusInternalServerError, "Gagal membuat file export")
-		return
-	}
+if err != nil {
+    log.Printf("export PO failed: %v", err) // TEMP: see internal/handlers/po_handler.go imports, add "log"
+    utils.Error(w, http.StatusInternalServerError, "Gagal membuat file export")
+    return
+}
 
 	f, err := os.Open(path)
 	if err != nil {

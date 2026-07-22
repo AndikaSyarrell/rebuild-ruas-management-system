@@ -99,30 +99,31 @@ func (s *ExportService) GetOrGenerate(ctx context.Context, f repository.ExportFi
 	}
 
 	v, err := s.group.Do(key, func() (interface{}, error) {
-		// Cek ulang setelah dapat giliran - goroutine lain mungkin baru saja
-		// selesai men-generate file yang sama persis saat kita menunggu lock.
-		if s.isFresh(path) {
-			return path, nil
-		}
+    if s.isFresh(path) {
+        return path, nil
+    }
 
-		rows, err := s.repo.ExportItemRows(ctx, f)
-		if err != nil {
-			return nil, fmt.Errorf("query export: %w", err)
-		}
+    rows, err := s.repo.ExportItemRows(ctx, f)
+    if err != nil {
+        return nil, fmt.Errorf("query export: %w", err)
+    }
 
-		tmpPath := path + ".tmp-" + utils.RandomHex(6)
-		if err := s.writeXlsx(tmpPath, rows); err != nil {
-			os.Remove(tmpPath)
-			return nil, fmt.Errorf("generate xlsx: %w", err)
-		}
-		// Rename atomik: pembaca yang cek mtime file selalu dapat versi utuh
-		// (lama ATAU baru), tidak pernah file setengah jadi.
-		if err := os.Rename(tmpPath, path); err != nil {
-			os.Remove(tmpPath)
-			return nil, fmt.Errorf("simpan file export: %w", err)
-		}
-		return path, nil
-	})
+    // Keep the .xlsx extension so excelize's SaveAs can detect the format;
+    // put the random suffix in the filename stem instead.
+    ext := filepath.Ext(path)                                  // ".xlsx"
+    base := strings.TrimSuffix(path, ext)                      // ".../a1b2c3..."
+    tmpPath := base + ".tmp-" + utils.RandomHex(6) + ext        // ".../a1b2c3....tmp-9f3e21.xlsx"
+
+    if err := s.writeXlsx(tmpPath, rows); err != nil {
+        os.Remove(tmpPath)
+        return nil, fmt.Errorf("generate xlsx: %w", err)
+    }
+    if err := os.Rename(tmpPath, path); err != nil {
+        os.Remove(tmpPath)
+        return nil, fmt.Errorf("simpan file export: %w", err)
+    }
+    return path, nil
+})
 	if err != nil {
 		return "", false, err
 	}
@@ -142,15 +143,15 @@ func (s *ExportService) writeXlsx(path string, rows []repository.ExportRow) erro
 
 	f, dataStartRow, colOrder, usingTemplate, err := s.openSheet(cols)
 	if err != nil {
-		return err
+		return fmt.Errorf("openSheet: %w", err)
 	}
 	defer f.Close()
 
 	sheet := f.GetSheetName(0)
 
-	numStyle, err := f.NewStyle(&excelize.Style{NumFmt: 3}) // "#,##0"
+	numStyle, err := f.NewStyle(&excelize.Style{NumFmt: 3})
 	if err != nil {
-		return err
+		return fmt.Errorf("NewStyle numStyle: %w", err)
 	}
 
 	for i, row := range rows {
@@ -185,9 +186,12 @@ func (s *ExportService) writeXlsx(path string, rows []repository.ExportRow) erro
 	}
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
+		return fmt.Errorf("MkdirAll: %w", err)
 	}
-	return f.SaveAs(path)
+	if err := f.SaveAs(path); err != nil {
+		return fmt.Errorf("SaveAs: %w", err)
+	}
+	return nil
 }
 
 // openSheet menyiapkan workbook kerja: pakai template kalau tersedia & valid,
