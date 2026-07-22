@@ -50,6 +50,7 @@ INSERT INTO T_Access (access_title, access_module, access_slug, access_create_da
   ('Update Invoice',       'po',      'update_invoice',            NOW()),
   ('Create Notes',         'po',      'create_notes',              NOW()),
   ('Upload Document',      'po',      'upload_document',           NOW()),
+  ('Export PO',            'po',      'export_po',                 NOW()),
   ('View Report Table',    'report',  'view_report_table',         NOW());
 
 -- Berikan SEMUA access di atas ke role Super Admin

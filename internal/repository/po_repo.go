@@ -569,7 +569,117 @@ func (r *PORepo) StatByRegion(ctx context.Context, picID string) ([]map[string]i
 	return out, rows.Err()
 }
 
-// Dashboard: PO terbaru berstatus open
+// --- Export (breakdown per item) ---
+
+// ExportFilter membawa seluruh kriteria filter export: rentang tanggal, divisi,
+// status PO, region, dan client. Kosong/0 berarti "semua" untuk dimensi tsb.
+type ExportFilter struct {
+	StartDate  string
+	EndDate    string
+	DivisionID int
+	Status     string
+	RegionID   int
+	ClientID   int
+}
+
+// ExportRow adalah 1 baris hasil export = 1 item PO (join header PO + item).
+// Semua field bertipe primitif (string/float64/int) karena NULL sudah
+// di-COALESCE di level SQL - lebih sederhana dipakai langsung oleh excelize.
+type ExportRow struct {
+	OrderNum     string
+	Invoice      string
+	Status       string
+	Date         string // format YYYY-MM-DD, "" jika belum diisi
+	RegionTitle  string
+	DivisionName string
+	PicName      string
+	AdminName    string
+	ClientName   string
+	ClientEmail  string
+	ClientPhone  string
+	SubClient    string
+	ItemProduct  string
+	ItemDesc     string
+	UnitTitle    string
+	ItemQty      int
+	ItemPrice    float64
+	Subtotal     float64
+	PpnRate      float64
+	PpnAmount    float64
+	Total        float64
+	Paid         string
+	Notes        string
+}
+
+// ExportItemRows mengganti PO::get_data_export dari PHP: satu baris per item PO,
+// dengan seluruh join & kondisi filter ter-parameterisasi penuh.
+func (r *PORepo) ExportItemRows(ctx context.Context, f ExportFilter) ([]ExportRow, error) {
+	conds := []string{"po.po_id != ''"}
+	var args []interface{}
+
+	if f.StartDate != "" && f.EndDate != "" {
+		conds = append(conds, "po.po_date BETWEEN ? AND ?")
+		args = append(args, f.StartDate, f.EndDate)
+	}
+	if f.DivisionID != 0 {
+		conds = append(conds, "po.po_ref_division = ?")
+		args = append(args, f.DivisionID)
+	}
+	if f.Status != "" && f.Status != "all" {
+		conds = append(conds, "po.po_status = ?")
+		args = append(args, f.Status)
+	}
+	if f.RegionID != 0 {
+		conds = append(conds, "po.po_ref_region = ?")
+		args = append(args, f.RegionID)
+	}
+	if f.ClientID != 0 {
+		conds = append(conds, "po.po_ref_client = ?")
+		args = append(args, f.ClientID)
+	}
+
+	query := `
+		SELECT po.po_order_num, COALESCE(po.po_invoice, ''), po.po_status,
+		       COALESCE(DATE_FORMAT(po.po_date, '%Y-%m-%d'), ''),
+		       COALESCE(rg.region_title, ''), COALESCE(dv.division_title, ''),
+		       COALESCE(pic.admin_name, ''), COALESCE(ad.admin_name, ''),
+		       po.po_client_name, po.po_client_email, po.po_client_phone,
+		       COALESCE(po.po_subclient, ''),
+		       it.item_product, COALESCE(it.item_desc, ''), COALESCE(u.unit_title, ''),
+		       it.item_qty, it.item_price,
+		       po.po_subtotal, po.po_ppn_rate, po.po_ppn_amount, po.po_total,
+		       po.po_paid, COALESCE(po.po_notes, '')
+		FROM T_Po po
+		JOIN T_Po_Item it ON it.item_ref_po = po.po_id
+		LEFT JOIN T_Region rg ON po.po_ref_region = rg.region_id
+		LEFT JOIN T_Division dv ON po.po_ref_division = dv.division_id
+		LEFT JOIN T_Admin pic ON po.po_ref_pic = pic.admin_id
+		LEFT JOIN T_Admin ad ON po.po_ref_admin = ad.admin_id
+		LEFT JOIN T_Unit u ON it.item_ref_unit = u.unit_id
+		WHERE ` + strings.Join(conds, " AND ") + `
+		ORDER BY po.po_date ASC, po.po_id ASC, it.item_id ASC`
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []ExportRow
+	for rows.Next() {
+		var v ExportRow
+		if err := rows.Scan(&v.OrderNum, &v.Invoice, &v.Status, &v.Date,
+			&v.RegionTitle, &v.DivisionName, &v.PicName, &v.AdminName,
+			&v.ClientName, &v.ClientEmail, &v.ClientPhone, &v.SubClient,
+			&v.ItemProduct, &v.ItemDesc, &v.UnitTitle, &v.ItemQty, &v.ItemPrice,
+			&v.Subtotal, &v.PpnRate, &v.PpnAmount, &v.Total, &v.Paid, &v.Notes); err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
 func (r *PORepo) ListDashboardOpen(ctx context.Context, regionID int, picID string, limit int) ([]models.PO, error) {
 	conds := []string{"po.po_status = 'open'"}
 	var args []interface{}

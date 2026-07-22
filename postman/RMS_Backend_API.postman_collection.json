@@ -1863,6 +1863,52 @@
           "response": []
         },
         {
+          "name": "Export PO (breakdown per-item, cached)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/po/export?start_date=2026-01-01&end_date=2026-12-31&region=1&division=1&status=all&client=",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "po",
+                "export"
+              ],
+              "query": [
+                {
+                  "key": "start_date",
+                  "value": "2026-01-01"
+                },
+                {
+                  "key": "end_date",
+                  "value": "2026-12-31"
+                },
+                {
+                  "key": "region",
+                  "value": "1"
+                },
+                {
+                  "key": "division",
+                  "value": "1"
+                },
+                {
+                  "key": "status",
+                  "value": "all"
+                },
+                {
+                  "key": "client",
+                  "value": ""
+                }
+              ]
+            },
+            "description": "Download .xlsx breakdown per-item. Response header X-Export-Cache akan HIT jika filter identik dengan request sebelumnya dalam TTL (default 20 menit), MISS jika baru di-generate. Klik 'Send and Download' di Postman untuk menyimpan filenya."
+          },
+          "response": []
+        },
+        {
           "name": "PO Detail",
           "request": {
             "method": "GET",
@@ -1905,7 +1951,7 @@
             "description": "client_id kosongkan (hapus field / isi 0) jika ingin membuat klien baru sekaligus - isi client_name/client_email/client_phone/client_address.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"order_num\": \"PO-DEMO-0001\",\n  \"region_id\": 1,\n  \"pic_id\": \"{{admin_id}}\",\n  \"division_id\": 1,\n  \"ppn_id\": 1,\n  \"date\": \"2026-07-16\",\n  \"client_id\": \"{{client_id}}\",\n  \"sub_client\": \"\",\n  \"items\": [\n    {\n      \"product\": \"Kertas A4\",\n      \"desc\": \"80gsm\",\n      \"qty\": 10,\n      \"unit_id\": 1,\n      \"price\": 50000\n    },\n    {\n      \"product\": \"Tinta Printer\",\n      \"desc\": \"Hitam\",\n      \"qty\": 2,\n      \"unit_id\": 1,\n      \"price\": 150000\n    }\n  ]\n}",
+              "raw": "{\n  \"order_num\": \"PO-DEMO-0001\",\n  \"region_id\": 1,\n  \"pic_id\": \"{{admin_id}}\",\n  \"division_id\": 1,\n  \"ppn_id\": 1,\n  \"date\": \"2026-07-16\",\n  \"client_id\": {{client_id}},\n  \"sub_client\": \"\",\n  \"items\": [\n    {\n      \"product\": \"Kertas A4\",\n      \"desc\": \"80gsm\",\n      \"qty\": 10,\n      \"unit_id\": 1,\n      \"price\": 50000\n    },\n    {\n      \"product\": \"Tinta Printer\",\n      \"desc\": \"Hitam\",\n      \"qty\": 2,\n      \"unit_id\": 1,\n      \"price\": 150000\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1950,7 +1996,7 @@
             "description": "",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"order_num\": \"PO-DEMO-0001\",\n  \"region_id\": 1,\n  \"pic_id\": \"{{admin_id}}\",\n  \"division_id\": 1,\n  \"date\": \"2026-07-16\",\n  \"client_id\": \"{{client_id}}\",\n  \"sub_client\": \"\"\n}",
+              "raw": "{\n  \"order_num\": \"PO-DEMO-0001\",\n  \"region_id\": 1,\n  \"pic_id\": \"{{admin_id}}\",\n  \"division_id\": 1,\n  \"date\": \"2026-07-16\",\n  \"client_id\": {{client_id}},\n  \"sub_client\": \"\"\n}",
               "options": {
                 "raw": {
                   "language": "json"

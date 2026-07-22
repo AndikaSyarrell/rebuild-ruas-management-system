@@ -193,6 +193,7 @@ func New(d *Dependencies) http.Handler {
 		api.Route("/po", func(rt chi.Router) {
 			rt.Get("/", d.POHandler.List)
 			rt.Get("/total", d.POHandler.Total)
+			rt.With(requireAccess("export_po")).Get("/export", d.POHandler.Export)
 			rt.Get("/{id}", d.POHandler.Detail)
 			rt.With(requireAccess("create_po")).Post("/", d.POHandler.Create)
 			rt.With(requireAccess("edit_po")).Put("/{id}", d.POHandler.Update)

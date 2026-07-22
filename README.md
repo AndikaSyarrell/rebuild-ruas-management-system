@@ -165,13 +165,70 @@ lalu masukkan hasilnya ke kolom `admin_password` lewat SQL, atau pakai endpoint
   tipe field **File** pada key `image`/`file` lalu pilih file dari komputer -
   Postman tidak bisa mengisi file lewat JSON.
 
-## Catatan implementasi yang sengaja disederhanakan
+## Export PO ke Excel (breakdown per-item)
+
+`GET /api/po/export` — butuh akses `export_po`. Filter (semua opsional, query string):
+
+| Param        | Arti                                          |
+|--------------|------------------------------------------------|
+| `start_date` | tanggal PO mulai (`YYYY-MM-DD`)                |
+| `end_date`   | tanggal PO sampai (`YYYY-MM-DD`)                |
+| `division`   | `division_id`                                   |
+| `status`     | `open`/`progress`/`prepared`/`complete`/`cancel`, kosong/`all` = semua |
+| `region`     | `region_id`                                     |
+| `client`     | `client_id`                                     |
+
+Contoh: `GET /api/po/export?start_date=2026-01-01&end_date=2026-12-31&region=1&status=complete`
+
+Hasilnya file `.xlsx` **breakdown per-item** (1 baris = 1 item PO, PO dengan 3
+item akan muncul di 3 baris dengan info header PO yang sama berulang).
+
+### Caching
+
+Response di-cache di disk (`PO_EXPORT_CACHE_DIR`, default
+`./storage/cache/exports`) selama `PO_EXPORT_TTL` (default **20 menit**),
+berdasarkan hash dari kombinasi seluruh filter di atas. Selama TTL:
+- Request dengan filter **identik** → langsung disajikan dari file cache,
+  tanpa query ulang ke database sama sekali.
+- Request dengan filter **berbeda** (walau cuma satu param) → dianggap cache
+  terpisah, query baru dijalankan.
+- Response menyertakan header `X-Export-Cache: HIT` atau `MISS` supaya mudah
+  diverifikasi saat testing.
+- Request bersamaan dengan filter identik saat cache kosong/kedaluwarsa hanya
+  memicu **satu** query+generate (di-dedupe secara in-process); yang lain
+  menunggu hasil yang sama.
+
+Ini didesain untuk single-instance deployment: cache berupa file di disk
+lokal, TTL dicek dari `mtime` file (tidak butuh Redis/registry terpisah). Kalau
+nanti backend di-scale ke banyak instance, `PO_EXPORT_CACHE_DIR` perlu
+dipindah ke shared storage (NFS/S3) atau caching-nya diganti ke Redis supaya
+seluruh instance berbagi cache yang sama.
+
+### Pakai template `.xlsx` sendiri
+
+Set `PO_EXPORT_TEMPLATE_PATH` ke path file `.xlsx` kamu. Aturannya:
+- Baris pertama (row 1) di template dibaca sebagai **header**, tiap cell-nya
+  dicocokkan (case-insensitive) ke daftar label kolom bawaan di bawah.
+- Kolom yang cocok akan dipakai **sesuai urutan & subset di template kamu** -
+  boleh hanya sebagian kolom, boleh diurutkan ulang, boleh diberi styling
+  sendiri (border/warna/lebar kolom template tetap dipertahankan).
+- Kolom yang labelnya tidak dikenali diabaikan (tidak diisi apa-apa).
+- Kalau template tidak ditemukan/tidak valid, otomatis fallback ke sheet
+  bawaan (generate dari nol, header bold + freeze row 1).
+
+Label kolom bawaan yang bisa dipakai di header template (harus sama persis,
+tidak case-sensitive): `No PO`, `Invoice`, `Status`, `Tanggal PO`, `Region`,
+`Divisi`, `PIC`, `Dibuat Oleh`, `Klien`, `Email Klien`, `Telepon Klien`,
+`Sub Client`, `Produk`, `Deskripsi`, `Satuan`, `Qty`, `Harga Satuan`,
+`Total Item`, `Subtotal PO`, `PPN (%)`, `Jumlah PPN`, `Total PO`,
+`Status Bayar`, `Catatan`.
+
+
 
 - Resize/generate thumbnail gambar admin belum diimplementasikan (file asli
   disimpan apa adanya); sebaiknya dipindah ke worker/CDN terpisah.
-- Export PO (Excel/PDF) belum diimplementasikan sebagai endpoint tersendiri;
-  data mentah untuk export bisa diambil dari `GET /api/po` dengan filter yang
-  sama lalu diproses di frontend atau ditambahkan endpoint export khusus.
+- Export PDF untuk PO belum diimplementasikan (hanya Excel/.xlsx, lihat
+  bagian "Export PO ke Excel" di atas).
 - Modul `Address` & `History` pada file PHP asli (`api_address.php`,
   `api_history.php`) tidak memiliki tabel yang jelas di `rms_normalized.sql`
   sehingga belum dikonversi; tambahkan modelnya jika skema tersebut memang

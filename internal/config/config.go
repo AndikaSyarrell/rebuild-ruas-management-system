@@ -40,6 +40,10 @@ type Config struct {
 	GlobalRateLimit  int
 	GlobalRateWindow time.Duration
 
+	POExportCacheDir string
+	POExportTemplate string
+	POExportTTL      time.Duration
+
 	SMTPHost     string
 	SMTPPort     string
 	SMTPUser     string
@@ -108,6 +112,10 @@ func Load() *Config {
 
 		GlobalRateLimit:  getEnvInt("GLOBAL_RATE_LIMIT", 300),
 		GlobalRateWindow: getEnvDuration("GLOBAL_RATE_WINDOW", time.Minute),
+
+		POExportCacheDir: getEnv("PO_EXPORT_CACHE_DIR", "./storage/cache/exports"),
+		POExportTemplate: getEnv("PO_EXPORT_TEMPLATE_PATH", ""),
+		POExportTTL:      getEnvDuration("PO_EXPORT_TTL", 20*time.Minute),
 
 		SMTPHost:     getEnv("SMTP_HOST", ""),
 		SMTPPort:     getEnv("SMTP_PORT", "587"),

@@ -21,11 +21,14 @@ import (
 )
 
 func main() {
-	config.LoadDotEnv(".env")   // <-- baris baru, taruh sebelum config.Load()
+	config.LoadDotEnv(".env")
 	cfg := config.Load()
 
 	if cfg.JWTAccessSecret == "" || cfg.JWTRefreshSecret == "" {
-		log.Fatal("JWT_ACCESS_SECRET dan JWT_REFRESH_SECRET wajib diset (lihat .env.example)")
+		log.Fatal("JWT_ACCESS_SECRET dan JWT_REFRESH_SECRET wajib diisi. " +
+			"Pastikan file .env ada di direktori tempat Anda menjalankan `go run ./cmd/api` " +
+			"(root project, sejajar dengan go.mod), atau export manual: " +
+			"`export JWT_ACCESS_SECRET=... JWT_REFRESH_SECRET=...` sebelum menjalankan aplikasi.")
 	}
 
 	sqlDB, err := db.New(db.Config{
@@ -68,6 +71,11 @@ func main() {
 
 	// --- Services ---
 	authService := service.NewAuthService(adminRepo, jwtManager, rdb)
+	exportService := service.NewExportService(poRepo, service.ExportConfig{
+		CacheDir:     cfg.POExportCacheDir,
+		TemplatePath: cfg.POExportTemplate,
+		TTL:          cfg.POExportTTL,
+	})
 	loginThrottle := middleware.NewLoginThrottle(rdb, cfg.LoginMaxAttemptsPerIP, cfg.LoginAttemptsPerIPWindow,
 		cfg.LoginMaxAttemptsPerEmail, cfg.LoginLockoutDuration)
 	pwThrottle := middleware.NewPasswordChangeThrottle(rdb, cfg.PwChangeMaxAttempts, cfg.PwChangeLockoutDuration)
@@ -89,7 +97,7 @@ func main() {
 		AccessHandler:    handlers.NewAccessHandler(accessRepo),
 		AdminHandler:     handlers.NewAdminHandler(adminRepo, mailService, "./storage/uploads", cfg.FrontendBaseURL),
 		ClientHandler:    handlers.NewClientHandler(clientRepo),
-		POHandler:        handlers.NewPOHandler(poRepo, activityRepo, clientRepo, ppnRepo),
+		POHandler:        handlers.NewPOHandler(poRepo, activityRepo, clientRepo, ppnRepo, exportService),
 		ActivityHandler:  handlers.NewActivityHandler(activityRepo),
 		DocumentHandler:  handlers.NewDocumentHandler(documentRepo, poRepo, activityRepo, "./storage/uploads"),
 		DashboardHandler: handlers.NewDashboardHandler(poRepo),

@@ -2,24 +2,29 @@ package handlers
 
 import (
 	"fmt"
+	"io"
 	"net/http"
+	"os"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	"rms-backend/internal/repository"
+	"rms-backend/internal/service"
 	"rms-backend/internal/utils"
 )
 
 type POHandler struct {
-	repo         *repository.PORepo
-	activityRepo *repository.ActivityRepo
-	clientRepo   *repository.ClientRepo
-	ppnRepo      *repository.PpnRepo
+	repo          *repository.PORepo
+	activityRepo  *repository.ActivityRepo
+	clientRepo    *repository.ClientRepo
+	ppnRepo       *repository.PpnRepo
+	exportService *service.ExportService
 }
 
-func NewPOHandler(repo *repository.PORepo, activityRepo *repository.ActivityRepo, clientRepo *repository.ClientRepo, ppnRepo *repository.PpnRepo) *POHandler {
-	return &POHandler{repo: repo, activityRepo: activityRepo, clientRepo: clientRepo, ppnRepo: ppnRepo}
+func NewPOHandler(repo *repository.PORepo, activityRepo *repository.ActivityRepo, clientRepo *repository.ClientRepo, ppnRepo *repository.PpnRepo, exportService *service.ExportService) *POHandler {
+	return &POHandler{repo: repo, activityRepo: activityRepo, clientRepo: clientRepo, ppnRepo: ppnRepo, exportService: exportService}
 }
 
 func (h *POHandler) logActivity(r *http.Request, poID, actType, notes string) {
@@ -64,6 +69,48 @@ func (h *POHandler) List(w http.ResponseWriter, r *http.Request) {
 	utils.JSONMeta(w, http.StatusOK, true, "Fetch success", data, map[string]any{
 		"total_data": total, "total_page": utils.TotalPage(total, p.PerPage), "page": p.Page,
 	})
+}
+
+// GET /api/po/export?start_date=&end_date=&division=&status=&region=&client=
+//
+// Export breakdown per-item (1 baris = 1 item PO) ke .xlsx. Hasil di-cache di
+// disk selama TTL (lihat PO_EXPORT_TTL) berdasarkan kombinasi filter -
+// permintaan berikutnya dengan filter identik dalam TTL yang sama langsung
+// disajikan dari file cache tanpa query ulang ke database.
+func (h *POHandler) Export(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	filter := repository.ExportFilter{
+		StartDate:  utils.ParseDateParam(q.Get("start_date")),
+		EndDate:    utils.ParseDateParam(q.Get("end_date")),
+		DivisionID: utils.AtoiDefault(q.Get("division"), 0),
+		Status:     q.Get("status"),
+		RegionID:   utils.AtoiDefault(q.Get("region"), 0),
+		ClientID:   utils.AtoiDefault(q.Get("client"), 0),
+	}
+
+	path, cacheHit, err := h.exportService.GetOrGenerate(r.Context(), filter)
+	if err != nil {
+		utils.Error(w, http.StatusInternalServerError, "Gagal membuat file export")
+		return
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
+		utils.Error(w, http.StatusInternalServerError, "Gagal membuka file export")
+		return
+	}
+	defer f.Close()
+
+	filename := fmt.Sprintf("PO_Export_%s.xlsx", time.Now().Format("20060102_150405"))
+	w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+	if cacheHit {
+		w.Header().Set("X-Export-Cache", "HIT")
+	} else {
+		w.Header().Set("X-Export-Cache", "MISS")
+	}
+
+	io.Copy(w, f)
 }
 
 // GET /api/po/total?...  - ringkasan jumlah per status untuk badge
