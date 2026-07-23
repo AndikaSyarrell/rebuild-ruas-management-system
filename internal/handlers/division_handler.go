@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"net/http"
-	"strconv"
 
 	"github.com/go-chi/chi/v5"
 
@@ -38,7 +37,10 @@ func (h *DivisionHandler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *DivisionHandler) Detail(w http.ResponseWriter, r *http.Request) {
-	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
+	id, ok := utils.ParseIDParam(w, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
 	data, err := h.repo.GetByID(r.Context(), id)
 	if err != nil {
 		utils.Error(w, http.StatusNotFound, "Divisi tidak ditemukan")
@@ -66,7 +68,10 @@ func (h *DivisionHandler) Create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *DivisionHandler) Update(w http.ResponseWriter, r *http.Request) {
-	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
+	id, ok := utils.ParseIDParam(w, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
 	var req divisionRequest
 	if err := decodeJSON(r, &req); err != nil || req.Title == "" {
 		utils.Error(w, http.StatusBadRequest, "Judul divisi wajib diisi")
@@ -80,7 +85,10 @@ func (h *DivisionHandler) Update(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *DivisionHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
+	id, ok := utils.ParseIDParam(w, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
 	if err := h.repo.Delete(r.Context(), id); err != nil {
 		utils.Error(w, http.StatusInternalServerError, "Gagal menghapus divisi")
 		return

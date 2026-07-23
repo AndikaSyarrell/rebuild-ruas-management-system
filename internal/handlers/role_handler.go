@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -43,7 +42,10 @@ func (h *RoleHandler) Select(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/roles/{id}  - detail role beserta daftar access_id yang dimiliki
 func (h *RoleHandler) Detail(w http.ResponseWriter, r *http.Request) {
-	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
+	id, ok := utils.ParseIDParam(w, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
 	role, err := h.repo.GetByID(r.Context(), id)
 	if err != nil {
 		utils.Error(w, http.StatusNotFound, "Role tidak ditemukan")
@@ -64,11 +66,10 @@ func slugify(title string) string {
 }
 
 type roleRequest struct {
-	Title     string `json:"title"`
-	AccessIDs []int  `json:"access_ids"`
+	Title     string          `json:"title"`
+	AccessIDs []utils.FlexInt `json:"access_ids"`
 }
 
-// POST /api/roles
 func (h *RoleHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var req roleRequest
 	if err := decodeJSON(r, &req); err != nil || req.Title == "" {
@@ -82,7 +83,11 @@ func (h *RoleHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(req.AccessIDs) > 0 {
-		if err := h.accessRepo.ReplaceRoleAccess(r.Context(), int(id), req.AccessIDs); err != nil {
+		accessIDs := make([]int, len(req.AccessIDs))
+		for i, a := range req.AccessIDs {
+			accessIDs[i] = int(a)
+		}
+		if err := h.accessRepo.ReplaceRoleAccess(r.Context(), int(id), accessIDs); err != nil {
 			utils.Error(w, http.StatusInternalServerError, "Role dibuat, namun gagal menyimpan daftar akses")
 			return
 		}
@@ -90,9 +95,11 @@ func (h *RoleHandler) Create(w http.ResponseWriter, r *http.Request) {
 	utils.Created(w, "Role berhasil dibuat", map[string]any{"role_id": id})
 }
 
-// PUT /api/roles/{id}
 func (h *RoleHandler) Update(w http.ResponseWriter, r *http.Request) {
-	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
+	id, ok := utils.ParseIDParam(w, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
 	var req roleRequest
 	if err := decodeJSON(r, &req); err != nil || req.Title == "" {
 		utils.Error(w, http.StatusBadRequest, "Judul role wajib diisi")
@@ -103,7 +110,11 @@ func (h *RoleHandler) Update(w http.ResponseWriter, r *http.Request) {
 		utils.Error(w, http.StatusInternalServerError, "Gagal memperbarui role")
 		return
 	}
-	if err := h.accessRepo.ReplaceRoleAccess(r.Context(), id, req.AccessIDs); err != nil {
+	accessIDs := make([]int, len(req.AccessIDs))
+	for i, a := range req.AccessIDs {
+		accessIDs[i] = int(a)
+	}
+	if err := h.accessRepo.ReplaceRoleAccess(r.Context(), id, accessIDs); err != nil {
 		utils.Error(w, http.StatusInternalServerError, "Role diperbarui, namun gagal menyimpan daftar akses")
 		return
 	}
@@ -111,7 +122,10 @@ func (h *RoleHandler) Update(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *RoleHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
+	id, ok := utils.ParseIDParam(w, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
 	if err := h.repo.Delete(r.Context(), id); err != nil {
 		utils.Error(w, http.StatusInternalServerError, "Gagal menghapus role")
 		return

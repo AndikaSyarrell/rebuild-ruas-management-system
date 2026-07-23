@@ -5,6 +5,7 @@ import (
 	"database/sql"
 
 	"rms-backend/internal/models"
+	"rms-backend/internal/utils"
 )
 
 type AdminRepo struct{ db *sql.DB }
@@ -46,12 +47,12 @@ func (r *AdminRepo) GetByID(ctx context.Context, id string) (*models.Admin, erro
 }
 
 func (r *AdminRepo) GetByToken(ctx context.Context, token string) (*models.Admin, error) {
-	row := r.db.QueryRowContext(ctx, adminSelectWithJoins+" WHERE a.admin_token = ? LIMIT 1", token)
+	row := r.db.QueryRowContext(ctx, adminSelectWithJoins+" WHERE a.admin_token = ? LIMIT 1", utils.HashToken(token))
 	return scanAdmin(row)
 }
 
 func (r *AdminRepo) GetByResetCode(ctx context.Context, code string) (*models.Admin, error) {
-	row := r.db.QueryRowContext(ctx, adminSelectWithJoins+" WHERE a.admin_reset_code = ? LIMIT 1", code)
+	row := r.db.QueryRowContext(ctx, adminSelectWithJoins+" WHERE a.admin_reset_code = ? LIMIT 1", utils.HashToken(code))
 	return scanAdmin(row)
 }
 
@@ -159,7 +160,7 @@ func (r *AdminRepo) Create(ctx context.Context, id, email, name string, regionID
 		`INSERT INTO T_Admin (admin_id, admin_email, admin_name, admin_ref_role, admin_token, admin_active,
 		 admin_pic, admin_pic_client, admin_ref_region, admin_create_date)
 		 VALUES (?, ?, ?, ?, ?, 'inactive', ?, ?, ?, NOW())`,
-		id, email, name, roleID, token, pic, picClient, regionID)
+		id, email, name, roleID, utils.HashToken(token), pic, picClient, regionID)
 	return err
 }
 
@@ -183,19 +184,19 @@ func (r *AdminRepo) UpdatePassword(ctx context.Context, id, passwordHash string)
 }
 
 func (r *AdminRepo) UpdateToken(ctx context.Context, id, token string) error {
-	_, err := r.db.ExecContext(ctx, `UPDATE T_Admin SET admin_token = ? WHERE admin_id = ?`, token, id)
+	_, err := r.db.ExecContext(ctx, `UPDATE T_Admin SET admin_token = ? WHERE admin_id = ?`, utils.HashToken(token), id)
 	return err
 }
 
 func (r *AdminRepo) SetResetCode(ctx context.Context, email, code string) error {
-	_, err := r.db.ExecContext(ctx, `UPDATE T_Admin SET admin_reset_code = ? WHERE admin_email = ?`, code, email)
+	_, err := r.db.ExecContext(ctx, `UPDATE T_Admin SET admin_reset_code = ? WHERE admin_email = ?`, utils.HashToken(code), email)
 	return err
 }
 
 func (r *AdminRepo) ActivateAccount(ctx context.Context, email, token, passwordHash string) error {
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE T_Admin SET admin_token = NULL, admin_active = 'active', admin_password = ?
-		 WHERE admin_email = ? AND admin_token = ?`, passwordHash, email, token)
+		 WHERE admin_email = ? AND admin_token = ?`, passwordHash, email, utils.HashToken(token))
 	return err
 }
 

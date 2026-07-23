@@ -1,6 +1,8 @@
 package routes
 
 import (
+	"context"
+	"database/sql"
 	"net/http"
 	"time"
 
@@ -19,6 +21,7 @@ import (
 type Dependencies struct {
 	Cfg *config.Config
 
+	DB		  	*sql.DB
 	JWTManager  *utils.JWTManager
 	AuthService *service.AuthService
 	RDB         *redis.Client
@@ -85,7 +88,43 @@ func New(d *Dependencies) http.Handler {
 	}
 
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		// Liveness probe - cuma menjawab "proses masih hidup & bisa serve
+		// HTTP", TIDAK menyentuh dependency eksternal (DB/Redis). Kalau ini
+		// dijadikan readiness probe, DB/Redis yang lambat/down akan membuat
+		// k8s salah kaprah me-restart pod yang sebetulnya sehat (liveness
+		// dan readiness punya tujuan berbeda, jangan dicampur).
 		utils.OK(w, "OK", nil)
+	})
+
+	r.Get("/readyz", func(w http.ResponseWriter, r *http.Request) {
+		// Readiness probe - benar-benar ping DB & Redis. Kalau salah satu
+		// down/timeout, balas 503 supaya load balancer/k8s berhenti
+		// mengirim traffic ke instance ini sampai dependency-nya pulih.
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+
+		checks := map[string]string{}
+		healthy := true
+
+		if err := d.DB.PingContext(ctx); err != nil {
+			checks["database"] = "down: " + err.Error()
+			healthy = false
+		} else {
+			checks["database"] = "ok"
+		}
+
+		if err := d.RDB.Ping(ctx).Err(); err != nil {
+			checks["redis"] = "down: " + err.Error()
+			healthy = false
+		} else {
+			checks["redis"] = "ok"
+		}
+
+		if !healthy {
+			utils.JSON(w, http.StatusServiceUnavailable, false, "Service belum siap", checks)
+			return
+		}
+		utils.JSON(w, http.StatusOK, true, "Ready", checks)
 	})
 
 	r.Route("/api/auth", func(rt chi.Router) {
@@ -145,21 +184,23 @@ func New(d *Dependencies) http.Handler {
 		})
 
 		// --- RBAC: Role & Access ---
+		// PENTING: modul ini mengatur akses itu sendiri — wajib digating,
+		// jangan biarkan sembarang admin login bisa buat/ubah role & akses.
 		api.Route("/roles", func(rt chi.Router) {
 			rt.Get("/", d.RoleHandler.List)
 			rt.Get("/select", d.RoleHandler.Select)
 			rt.Get("/{id}", d.RoleHandler.Detail)
-			rt.Post("/", d.RoleHandler.Create)
-			rt.Put("/{id}", d.RoleHandler.Update)
-			rt.Delete("/{id}", d.RoleHandler.Delete)
+			rt.With(requireAccess("create_role")).Post("/", d.RoleHandler.Create)
+			rt.With(requireAccess("edit_role")).Put("/{id}", d.RoleHandler.Update)
+			rt.With(requireAccess("delete_role")).Delete("/{id}", d.RoleHandler.Delete)
 		})
 		api.Route("/access", func(rt chi.Router) {
 			rt.Get("/", d.AccessHandler.List)
 			rt.Get("/module/{module}", d.AccessHandler.ListByModule)
 			rt.Get("/{id}", d.AccessHandler.Detail)
-			rt.Post("/", d.AccessHandler.Create)
-			rt.Put("/{id}", d.AccessHandler.Update)
-			rt.Delete("/{id}", d.AccessHandler.Delete)
+			rt.With(requireAccess("create_access")).Post("/", d.AccessHandler.Create)
+			rt.With(requireAccess("edit_access")).Put("/{id}", d.AccessHandler.Update)
+			rt.With(requireAccess("delete_access")).Delete("/{id}", d.AccessHandler.Delete)
 		})
 
 		// --- Admin (internal users) ---
@@ -171,10 +212,10 @@ func New(d *Dependencies) http.Handler {
 			rt.With(requireAccess("create_new_admin")).Post("/", d.AdminHandler.Create)
 			rt.With(requireAccess("edit_other_admin")).Put("/{id}", d.AdminHandler.Update)
 			rt.With(requireAccess("edit_pic")).Post("/{id}/image", d.AdminHandler.UploadImage)
-			rt.Post("/{id}/resend-activation", d.AdminHandler.ResendActivation)
+			rt.With(requireAccess("resend_admin_activation")).Post("/{id}/resend-activation", d.AdminHandler.ResendActivation)
 			rt.With(requireAccess("deactivate_other_admin")).Post("/{id}/deactivate", d.AdminHandler.Deactivate)
 			rt.With(requireAccess("deactivate_other_admin")).Post("/{id}/activate", d.AdminHandler.ActivateExisting)
-			rt.Delete("/{id}", d.AdminHandler.Delete)
+			rt.With(requireAccess("delete_admin")).Delete("/{id}", d.AdminHandler.Delete)
 		})
 
 		// --- Client ---
@@ -199,10 +240,10 @@ func New(d *Dependencies) http.Handler {
 			rt.With(requireAccess("edit_po")).Put("/{id}", d.POHandler.Update)
 			rt.With(requireAccess("delete_po")).Delete("/{id}", d.POHandler.Delete)
 
-			rt.Post("/{id}/status", d.POHandler.ChangeStatus)
+			rt.With(requireAccess("change_stat_po")).Post("/{id}/status", d.POHandler.ChangeStatus)
 			rt.With(requireAccess("change_stat_paid")).Post("/{id}/paid", d.POHandler.ChangePaid)
 			rt.With(requireAccess("update_invoice")).Post("/{id}/invoice", d.POHandler.UpdateInvoice)
-			rt.Post("/{id}/notes", d.POHandler.UpdateNotes)
+			rt.With(requireAccess("update_po_notes")).Post("/{id}/notes", d.POHandler.UpdateNotes)
 
 			rt.Get("/{id}/items", d.POHandler.ListItems)
 			rt.With(requireAccess("edit_po")).Post("/{id}/items", d.POHandler.AddItem)
@@ -217,6 +258,9 @@ func New(d *Dependencies) http.Handler {
 			rt.With(requireAccess("upload_document")).Delete("/{id}/documents/{docId}", d.DocumentHandler.Delete)
 		})
 
+		// Dashboard & activity feed: read-only, konsisten dengan pola GET list
+		// di modul lain (region/client/po) yang cukup butuh login, tanpa
+		// RequireAccess tambahan. Ini keputusan SENGAJA, bukan kelupaan.
 		api.Get("/activities/dashboard", d.ActivityHandler.Dashboard)
 		api.Get("/dashboard", d.DashboardHandler.Summary)
 

@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"net/http"
-	"strconv"
 
 	"github.com/go-chi/chi/v5"
 
@@ -38,7 +37,10 @@ func (h *AccessHandler) ListByModule(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AccessHandler) Detail(w http.ResponseWriter, r *http.Request) {
-	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
+	id, ok := utils.ParseIDParam(w, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
 	data, err := h.repo.GetByID(r.Context(), id)
 	if err != nil {
 		utils.Error(w, http.StatusNotFound, "Akses tidak ditemukan")
@@ -68,7 +70,10 @@ func (h *AccessHandler) Create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AccessHandler) Update(w http.ResponseWriter, r *http.Request) {
-	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
+	id, ok := utils.ParseIDParam(w, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
 	var req accessRequest
 	if err := decodeJSON(r, &req); err != nil || req.Title == "" || req.Module == "" || req.Slug == "" {
 		utils.Error(w, http.StatusBadRequest, "Data akses tidak lengkap")
@@ -82,7 +87,10 @@ func (h *AccessHandler) Update(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AccessHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
+	id, ok := utils.ParseIDParam(w, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
 	if err := h.repo.Delete(r.Context(), id); err != nil {
 		utils.Error(w, http.StatusInternalServerError, "Gagal menghapus akses")
 		return

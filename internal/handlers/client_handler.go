@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -43,7 +42,10 @@ func (h *ClientHandler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ClientHandler) Detail(w http.ResponseWriter, r *http.Request) {
-	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
+	id, ok := utils.ParseIDParam(w, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
 	data, err := h.repo.GetByID(r.Context(), id)
 	if err != nil {
 		utils.Error(w, http.StatusNotFound, "Klien tidak ditemukan")
@@ -53,16 +55,16 @@ func (h *ClientHandler) Detail(w http.ResponseWriter, r *http.Request) {
 }
 
 type clientRequest struct {
-	Name     string `json:"name"`
-	Email    string `json:"email"`
-	Phone    string `json:"phone"`
-	Address  string `json:"address"`
-	RegionID int    `json:"region_id"`
+	Name     string        `json:"name"`
+	Email    string        `json:"email"`
+	Phone    string        `json:"phone"`
+	Address  string        `json:"address"`
+	RegionID utils.FlexInt `json:"region_id"`
 }
 
 func (h *ClientHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var req clientRequest
-	if err := decodeJSON(r, &req); err != nil || req.Name == "" || req.Email == "" || req.RegionID == 0 {
+	if err := decodeJSON(r, &req); err != nil || req.Name == "" || req.Email == "" || int(req.RegionID) == 0 {
 		utils.Error(w, http.StatusBadRequest, "Data klien tidak lengkap")
 		return
 	}
@@ -78,7 +80,7 @@ func (h *ClientHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id, err := h.repo.Create(r.Context(), req.Name, req.Phone, req.Email, req.Address, req.RegionID)
+	id, err := h.repo.Create(r.Context(), req.Name, req.Phone, req.Email, req.Address, int(req.RegionID))
 	if err != nil {
 		utils.Error(w, http.StatusInternalServerError, "Gagal membuat klien")
 		return
@@ -87,7 +89,10 @@ func (h *ClientHandler) Create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ClientHandler) Update(w http.ResponseWriter, r *http.Request) {
-	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
+	id, ok := utils.ParseIDParam(w, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
 	var req clientRequest
 	if err := decodeJSON(r, &req); err != nil || req.Name == "" || req.Email == "" {
 		utils.Error(w, http.StatusBadRequest, "Data klien tidak lengkap")
@@ -112,7 +117,7 @@ func (h *ClientHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := h.repo.Update(r.Context(), id, req.Name, req.Phone, req.Email, req.Address, req.RegionID); err != nil {
+	if err := h.repo.Update(r.Context(), id, req.Name, req.Phone, req.Email, req.Address, int(req.RegionID)); err != nil {
 		utils.Error(w, http.StatusInternalServerError, "Gagal memperbarui klien")
 		return
 	}
@@ -120,7 +125,10 @@ func (h *ClientHandler) Update(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ClientHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
+	id, ok := utils.ParseIDParam(w, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
 	if err := h.repo.Delete(r.Context(), id); err != nil {
 		utils.Error(w, http.StatusInternalServerError, "Gagal menghapus klien")
 		return
@@ -137,7 +145,10 @@ func (h *ClientHandler) Deactivate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ClientHandler) setActive(w http.ResponseWriter, r *http.Request, active string) {
-	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
+	id, ok := utils.ParseIDParam(w, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
 	if err := h.repo.ChangeActive(r.Context(), id, active); err != nil {
 		utils.Error(w, http.StatusInternalServerError, "Gagal memperbarui status klien")
 		return

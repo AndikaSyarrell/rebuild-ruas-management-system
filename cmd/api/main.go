@@ -83,6 +83,7 @@ func main() {
 	// --- Handlers ---
 	deps := &routes.Dependencies{
 		Cfg:         cfg,
+		DB:          sqlDB,
 		JWTManager:  jwtManager,
 		AuthService: authService,
 		RDB:         rdb,

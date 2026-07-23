@@ -83,18 +83,18 @@ func (h *AdminHandler) ListPICClient(w http.ResponseWriter, r *http.Request) {
 }
 
 type createAdminRequest struct {
-	Email     string `json:"email"`
-	Name      string `json:"username"`
-	RoleID    *int   `json:"role_id"`
-	RegionID  int    `json:"region_id"`
-	Pic       string `json:"pic"`        // "yes" | "no"
-	PicClient string `json:"pic_client"` // "yes" | "no"
+	Email     string         `json:"email"`
+	Name      string         `json:"username"`
+	RoleID    *utils.FlexInt `json:"role_id"`
+	RegionID  utils.FlexInt  `json:"region_id"`
+	Pic       string         `json:"pic"`
+	PicClient string         `json:"pic_client"`
 }
 
 // POST /api/admins  - membuat admin baru berstatus inactive lalu mengirim email aktivasi
 func (h *AdminHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var req createAdminRequest
-	if err := decodeJSON(r, &req); err != nil || req.Email == "" || req.Name == "" || req.RegionID == 0 {
+	if err := decodeJSON(r, &req); err != nil || req.Email == "" || req.Name == "" || int(req.RegionID) == 0 {
 		utils.Error(w, http.StatusBadRequest, "Data admin tidak lengkap")
 		return
 	}
@@ -119,7 +119,13 @@ func (h *AdminHandler) Create(w http.ResponseWriter, r *http.Request) {
 	id := utils.GenerateSequentialID("ADM")
 	token := utils.RandomHex(20)
 
-	if err := h.repo.Create(r.Context(), id, req.Email, req.Name, req.RegionID, req.RoleID, token, req.Pic, req.PicClient); err != nil {
+	var roleID *int
+	if req.RoleID != nil {
+		v := int(*req.RoleID)
+		roleID = &v
+	}
+
+	if err := h.repo.Create(r.Context(), id, req.Email, req.Name, int(req.RegionID), roleID, token, req.Pic, req.PicClient); err != nil {
 		utils.Error(w, http.StatusInternalServerError, "Gagal membuat admin")
 		return
 	}
@@ -127,7 +133,6 @@ func (h *AdminHandler) Create(w http.ResponseWriter, r *http.Request) {
 	activationURL := fmt.Sprintf("%s/activate?token=%s&email=%s", h.frontendURL, token, req.Email)
 	_ = h.mail.SendActivationEmail(req.Email, req.Name, activationURL)
 
-	// notifikasi ke admin lain yang berhak menerima notifikasi pendaftaran admin baru
 	notifyList, _ := h.repo.ListByAccessSlug(r.Context(), "mail_new_admin_register")
 	if len(notifyList) > 0 {
 		emails := make([]string, 0, len(notifyList))
@@ -141,12 +146,12 @@ func (h *AdminHandler) Create(w http.ResponseWriter, r *http.Request) {
 }
 
 type updateAdminRequest struct {
-	Email     string `json:"email"`
-	Name      string `json:"username"`
-	RoleID    *int   `json:"role_id"`
-	RegionID  int    `json:"region_id"`
-	Pic       string `json:"pic"`
-	PicClient string `json:"pic_client"`
+	Email     string         `json:"email"`
+	Name      string         `json:"username"`
+	RoleID    *utils.FlexInt `json:"role_id"`
+	RegionID  utils.FlexInt  `json:"region_id"`
+	Pic       string         `json:"pic"`
+	PicClient string         `json:"pic_client"`
 }
 
 // PUT /api/admins/{id}
@@ -176,7 +181,13 @@ func (h *AdminHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := h.repo.Update(r.Context(), id, req.RoleID, req.Email, req.Name, req.Pic, req.PicClient, req.RegionID); err != nil {
+	var roleID *int
+	if req.RoleID != nil {
+		v := int(*req.RoleID)
+		roleID = &v
+	}
+
+	if err := h.repo.Update(r.Context(), id, roleID, req.Email, req.Name, req.Pic, req.PicClient, int(req.RegionID)); err != nil {
 		utils.Error(w, http.StatusInternalServerError, "Gagal memperbarui admin")
 		return
 	}

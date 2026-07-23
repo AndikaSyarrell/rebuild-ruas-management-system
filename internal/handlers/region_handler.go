@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"net/http"
-	"strconv"
 
 	"github.com/go-chi/chi/v5"
 
@@ -43,7 +42,10 @@ func (h *RegionHandler) List(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/regions/{id}
 func (h *RegionHandler) Detail(w http.ResponseWriter, r *http.Request) {
-	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
+	id, ok := utils.ParseIDParam(w, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
 	data, err := h.repo.GetByID(r.Context(), id)
 	if err != nil {
 		utils.Error(w, http.StatusNotFound, "Region tidak ditemukan")
@@ -73,7 +75,10 @@ func (h *RegionHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 // PUT /api/regions/{id}
 func (h *RegionHandler) Update(w http.ResponseWriter, r *http.Request) {
-	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
+	id, ok := utils.ParseIDParam(w, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
 	var req regionRequest
 	if err := decodeJSON(r, &req); err != nil || req.Title == "" {
 		utils.Error(w, http.StatusBadRequest, "Judul region wajib diisi")
@@ -88,7 +93,10 @@ func (h *RegionHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 // DELETE /api/regions/{id}
 func (h *RegionHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
+	id, ok := utils.ParseIDParam(w, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
 	if err := h.repo.Delete(r.Context(), id); err != nil {
 		utils.Error(w, http.StatusInternalServerError, "Gagal menghapus region (kemungkinan masih dipakai data lain)")
 		return

@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	
 )
 
 // Pagination adalah representasi page/item-per-page yang sudah divalidasi.
@@ -85,4 +86,13 @@ func AtoiDefault(s string, def int) int {
 		return def
 	}
 	return v
+}
+
+func ParseIDParam(w http.ResponseWriter, raw string) (int, bool) {
+	id, err := strconv.Atoi(raw)
+	if err != nil {
+		Error(w, http.StatusBadRequest, "ID tidak valid")
+		return 0, false
+	}
+	return id, true
 }

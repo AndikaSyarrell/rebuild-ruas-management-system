@@ -7,10 +7,14 @@ import (
 
 	"rms-backend/internal/middleware"
 )
-
+const maxJSONBodyBytes = 1 << 20 // 1 MB
 func decodeJSON(r *http.Request, dst interface{}) error {
 	defer r.Body.Close()
-	return json.NewDecoder(r.Body).Decode(dst)
+	r.Body = http.MaxBytesReader(nil, r.Body, maxJSONBodyBytes)
+
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	return dec.Decode(dst)
 }
 
 // actorFromContext mengambil admin_id & nama dari JWT claims - dipakai untuk

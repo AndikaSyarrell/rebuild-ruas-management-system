@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"net/http"
-	"strconv"
 
 	"github.com/go-chi/chi/v5"
 
@@ -36,7 +35,10 @@ func (h *UnitHandler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *UnitHandler) Detail(w http.ResponseWriter, r *http.Request) {
-	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
+	id, ok := utils.ParseIDParam(w, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
 	data, err := h.repo.GetByID(r.Context(), id)
 	if err != nil {
 		utils.Error(w, http.StatusNotFound, "Unit tidak ditemukan")
@@ -64,7 +66,10 @@ func (h *UnitHandler) Create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *UnitHandler) Update(w http.ResponseWriter, r *http.Request) {
-	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
+	id, ok := utils.ParseIDParam(w, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
 	var req unitRequest
 	if err := decodeJSON(r, &req); err != nil || req.Title == "" {
 		utils.Error(w, http.StatusBadRequest, "Judul unit wajib diisi")
@@ -78,7 +83,10 @@ func (h *UnitHandler) Update(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *UnitHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
+	id, ok := utils.ParseIDParam(w, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
 	if err := h.repo.Delete(r.Context(), id); err != nil {
 		utils.Error(w, http.StatusInternalServerError, "Gagal menghapus unit")
 		return

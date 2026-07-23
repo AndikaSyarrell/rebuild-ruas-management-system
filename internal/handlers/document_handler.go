@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -29,6 +28,20 @@ func NewDocumentHandler(repo *repository.DocumentRepo, poRepo *repository.PORepo
 
 var allowedDocExt = map[string]bool{
 	".pdf": true, ".doc": true, ".docx": true, ".jpg": true, ".jpeg": true, ".png": true, ".gif": true,
+}
+
+var allowedDocMIME = map[string]bool{
+	"application/pdf": true,
+	"image/jpeg":      true,
+	"image/png":       true,
+	"image/gif":       true,
+	// .doc lama (OLE compound file)
+	"application/x-cfb":   true,
+	"application/msword":  true,
+	// .docx (zip-based OOXML) - DetectContentType tidak baca isi internal ZIP,
+	// jadi terdeteksi generik sebagai zip.
+	"application/zip": true,
+	"application/vnd.openxmlformats-officedocument.wordprocessingml.document": true,
 }
 
 // GET /api/po/{id}/documents
@@ -65,6 +78,13 @@ func (h *DocumentHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	ext := strings.ToLower(filepath.Ext(header.Filename))
 	if !allowedDocExt[ext] {
 		utils.Error(w, http.StatusBadRequest, "Format file harus pdf, doc, docx, jpg, jpeg, png, atau gif")
+		return
+	}
+
+	// Validasi isi file (magic number) sesuai kategori ekstensi yang diklaim -
+	// mencegah file executable/script yang di-rename ekstensinya lolos upload.
+	if err := utils.ValidateFileContent(file, allowedDocMIME); err != nil {
+		utils.Error(w, http.StatusBadRequest, "Isi file tidak sesuai dengan format dokumen yang diklaim")
 		return
 	}
 
@@ -110,7 +130,10 @@ func (h *DocumentHandler) Upload(w http.ResponseWriter, r *http.Request) {
 // DELETE /api/po/{poId}/documents/{docId}
 func (h *DocumentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	poID := chi.URLParam(r, "id")
-	docID, _ := strconv.Atoi(chi.URLParam(r, "docId"))
+	docID, ok := utils.ParseIDParam(w, chi.URLParam(r, "docId"))
+	if !ok {
+		return
+	}
 
 	doc, err := h.repo.GetByID(r.Context(), docID)
 	if err != nil {

@@ -5,7 +5,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"strconv"
 	"time"
 	"log"
 
@@ -150,21 +149,21 @@ func (h *POHandler) Detail(w http.ResponseWriter, r *http.Request) {
 }
 
 type createPOItemRequest struct {
-	Desc    string  `json:"desc"`
-	Product string  `json:"product"`
-	Qty     int     `json:"qty"`
-	UnitID  int     `json:"unit_id"`
-	Price   float64 `json:"price"`
+	Desc    string          `json:"desc"`
+	Product string          `json:"product"`
+	Qty     utils.FlexInt   `json:"qty"`
+	UnitID  utils.FlexInt   `json:"unit_id"`
+	Price   utils.FlexFloat `json:"price"`
 }
 
 type createPORequest struct {
 	OrderNum    string                `json:"order_num"`
-	RegionID    int                   `json:"region_id"`
+	RegionID    utils.FlexInt         `json:"region_id"`
 	PicID       string                `json:"pic_id"`
-	DivisionID  *int                  `json:"division_id"`
-	PpnID       int                   `json:"ppn_id"`
+	DivisionID  *utils.FlexInt        `json:"division_id"`
+	PpnID       utils.FlexInt         `json:"ppn_id"`
 	Date        string                `json:"date"`
-	ClientID    int                   `json:"client_id"`
+	ClientID    utils.FlexInt         `json:"client_id"`
 	ClientName  string                `json:"client_name"`
 	ClientEmail string                `json:"client_email"`
 	ClientPhone string                `json:"client_phone"`
@@ -177,10 +176,14 @@ type createPORequest struct {
 func (h *POHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var req createPORequest
 	if err := decodeJSON(r, &req); err != nil {
-		utils.Error(w, http.StatusBadRequest, "Body permintaan tidak valid")
+		utils.Error(w, http.StatusBadRequest, "Body permintaan tidak valid: "+err.Error())
 		return
 	}
-	if req.OrderNum == "" || req.RegionID == 0 || req.PicID == "" || len(req.Items) == 0 {
+	regionID := int(req.RegionID)
+	clientID := int(req.ClientID)
+	ppnID := int(req.PpnID)
+
+	if req.OrderNum == "" || regionID == 0 || req.PicID == "" || len(req.Items) == 0 {
 		utils.Error(w, http.StatusBadRequest, "Nomor PO, region, PIC, dan minimal 1 item wajib diisi")
 		return
 	}
@@ -200,10 +203,7 @@ func (h *POHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// klien baru (belum punya client_id) langsung dibuat sebagai T_Client baru.
-	clientID := req.ClientID
 	if clientID == 0 {
-		// Tidak ada client_id -> anggap klien baru, wajib isi data lengkap manual.
 		if req.ClientEmail == "" || req.ClientName == "" {
 			utils.Error(w, http.StatusBadRequest, "Data klien tidak lengkap")
 			return
@@ -223,8 +223,6 @@ func (h *POHandler) Create(w http.ResponseWriter, r *http.Request) {
 			clientID = int(newID)
 		}
 	} else {
-		// client_id dikirim -> ambil otomatis nama/email/telepon/alamat dari T_Client,
-		// tidak perlu (dan tidak dipakai) meskipun field-field itu ikut dikirim di payload.
 		existingClient, err := h.clientRepo.GetByID(r.Context(), clientID)
 		if err != nil {
 			utils.Error(w, http.StatusBadRequest,
@@ -237,7 +235,7 @@ func (h *POHandler) Create(w http.ResponseWriter, r *http.Request) {
 		req.ClientAddr = existingClient.Address
 	}
 
-	ppn, err := h.ppnRepo.GetByID(r.Context(), req.PpnID)
+	ppn, err := h.ppnRepo.GetByID(r.Context(), ppnID)
 	if err != nil {
 		utils.Error(w, http.StatusBadRequest, "Tarif PPN tidak valid")
 		return
@@ -246,20 +244,28 @@ func (h *POHandler) Create(w http.ResponseWriter, r *http.Request) {
 	adminID, _ := actorFromContext(r.Context())
 	poID := utils.GenerateSequentialID("PO")
 
+	var divisionID *int
+	if req.DivisionID != nil {
+		v := int(*req.DivisionID)
+		divisionID = &v
+	}
+
 	items := make([]repository.NewPOItemInput, 0, len(req.Items))
 	for _, it := range req.Items {
-		if it.Product == "" || it.Qty <= 0 || it.UnitID == 0 {
+		qty := int(it.Qty)
+		unitID := int(it.UnitID)
+		if it.Product == "" || qty <= 0 || unitID == 0 {
 			utils.Error(w, http.StatusBadRequest, "Setiap item wajib memiliki produk, qty, dan satuan yang valid")
 			return
 		}
 		items = append(items, repository.NewPOItemInput{
-			Desc: it.Desc, Product: it.Product, Qty: it.Qty, UnitID: it.UnitID, Price: it.Price,
+			Desc: it.Desc, Product: it.Product, Qty: qty, UnitID: unitID, Price: float64(it.Price),
 		})
 	}
 
 	in := repository.NewPOInput{
-		ID: poID, OrderNum: req.OrderNum, RegionID: req.RegionID, AdminID: adminID, PicID: req.PicID,
-		DivisionID: req.DivisionID, PpnID: req.PpnID, PpnRate: ppn.Value, Date: date,
+		ID: poID, OrderNum: req.OrderNum, RegionID: regionID, AdminID: adminID, PicID: req.PicID,
+		DivisionID: divisionID, PpnID: ppnID, PpnRate: ppn.Value, Date: date,
 		ClientID: clientID, ClientName: req.ClientName, ClientEmail: req.ClientEmail,
 		ClientPhone: req.ClientPhone, ClientAddr: req.ClientAddr, SubClient: req.SubClient, Items: items,
 	}
@@ -270,7 +276,6 @@ func (h *POHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.logActivity(r, poID, "open", "Purchase order baru dibuat")
-
 	utils.Created(w, "PO berhasil dibuat", map[string]any{"po_id": poID})
 }
 
@@ -430,18 +435,18 @@ func (h *POHandler) ListItems(w http.ResponseWriter, r *http.Request) {
 }
 
 type itemRequest struct {
-	Desc    string  `json:"desc"`
-	Product string  `json:"product"`
-	Qty     int     `json:"qty"`
-	UnitID  int     `json:"unit_id"`
-	Price   float64 `json:"price"`
+	Desc    string          `json:"desc"`
+	Product string          `json:"product"`
+	Qty     utils.FlexInt   `json:"qty"`
+	UnitID  utils.FlexInt   `json:"unit_id"`
+	Price   utils.FlexFloat `json:"price"`
 }
 
 // POST /api/po/{id}/items
 func (h *POHandler) AddItem(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var req itemRequest
-	if err := decodeJSON(r, &req); err != nil || req.Product == "" || req.Qty <= 0 || req.UnitID == 0 {
+	if err := decodeJSON(r, &req); err != nil || req.Product == "" || int(req.Qty) <= 0 || int(req.UnitID) == 0 {
 		utils.Error(w, http.StatusBadRequest, "Data item tidak lengkap")
 		return
 	}
@@ -452,7 +457,7 @@ func (h *POHandler) AddItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := h.repo.AddItem(r.Context(), id, req.UnitID, req.Product, req.Desc, req.Qty, req.Price); err != nil {
+	if _, err := h.repo.AddItem(r.Context(), id, int(req.UnitID), req.Product, req.Desc, int(req.Qty), float64(req.Price)); err != nil {
 		utils.Error(w, http.StatusInternalServerError, "Gagal menambah item")
 		return
 	}
@@ -467,9 +472,12 @@ func (h *POHandler) AddItem(w http.ResponseWriter, r *http.Request) {
 
 // PUT /api/po/items/{itemId}
 func (h *POHandler) UpdateItem(w http.ResponseWriter, r *http.Request) {
-	itemID, _ := strconv.Atoi(chi.URLParam(r, "itemId"))
+	itemID, ok := utils.ParseIDParam(w, chi.URLParam(r, "itemId"))
+	if !ok {
+		return
+	}
 	var req itemRequest
-	if err := decodeJSON(r, &req); err != nil || req.Product == "" || req.Qty <= 0 || req.UnitID == 0 {
+	if err := decodeJSON(r, &req); err != nil || req.Product == "" || int(req.Qty) <= 0 || int(req.UnitID) == 0 {
 		utils.Error(w, http.StatusBadRequest, "Data item tidak lengkap")
 		return
 	}
@@ -485,7 +493,7 @@ func (h *POHandler) UpdateItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.repo.UpdateItem(r.Context(), itemID, req.UnitID, req.Product, req.Desc, req.Qty, req.Price); err != nil {
+	if err := h.repo.UpdateItem(r.Context(), itemID, int(req.UnitID), req.Product, req.Desc, int(req.Qty), float64(req.Price)); err != nil {
 		utils.Error(w, http.StatusInternalServerError, "Gagal memperbarui item")
 		return
 	}
@@ -500,7 +508,10 @@ func (h *POHandler) UpdateItem(w http.ResponseWriter, r *http.Request) {
 
 // DELETE /api/po/items/{itemId}
 func (h *POHandler) DeleteItem(w http.ResponseWriter, r *http.Request) {
-	itemID, _ := strconv.Atoi(chi.URLParam(r, "itemId"))
+	itemID, ok := utils.ParseIDParam(w, chi.URLParam(r, "itemId"))
+	if !ok {
+		return
+	}
 
 	poID, err := h.repo.GetItemPO(r.Context(), itemID)
 	if err != nil {
