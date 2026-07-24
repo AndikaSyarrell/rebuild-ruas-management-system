@@ -1,11 +1,10 @@
 package handlers
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
-	"strings"
 
+	"rms-backend/internal/dto"
 	"rms-backend/internal/middleware"
 	"rms-backend/internal/service"
 	"rms-backend/internal/utils"
@@ -24,36 +23,6 @@ func NewAuthHandler(authService *service.AuthService, throttle *middleware.Login
 	return &AuthHandler{authService: authService, throttle: throttle, pwChangeThrottle: pwChangeThrottle, mail: mail, logger: logger, frontendBaseURL: frontendBaseURL}
 }
 
-type loginRequest struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
-}
-
-type refreshRequest struct {
-	RefreshToken string `json:"refresh_token"`
-}
-
-type resetPasswordRequest struct {
-	OldPassword     string `json:"old_password"`
-	NewPassword     string `json:"new_password"`
-	ConfirmPassword string `json:"confirm_password"`
-}
-
-type forgotPasswordRequest struct {
-	Email string `json:"email"`
-}
-
-type resetWithCodeRequest struct {
-	ResetCode   string `json:"reset_code"`
-	NewPassword string `json:"new_password"`
-}
-
-type activateRequest struct {
-	Email    string `json:"email"`
-	Token    string `json:"token"`
-	Password string `json:"password"`
-}
-
 // Login godoc
 // POST /api/auth/login
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
@@ -61,15 +30,14 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	ip := utils.ClientIP(r)
 	userAgent := r.UserAgent()
 
-	var req loginRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	var req dto.LoginRequest
+	if err := decodeJSON(r, &req); err != nil {
 		utils.Error(w, http.StatusBadRequest, "Body permintaan tidak valid")
 		return
 	}
-	req.Email = strings.TrimSpace(strings.ToLower(req.Email))
-
-	if req.Email == "" || req.Password == "" {
-		utils.Error(w, http.StatusBadRequest, "Email dan password wajib diisi")
+	req.Normalize()
+	if err := req.Validate(); err != nil {
+		utils.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -125,13 +93,16 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		IP: ip, UserAgent: userAgent,
 	})
 
-	utils.OK(w, "Login berhasil", map[string]any{
-		"access_token":  pair.AccessToken,
-		"refresh_token": pair.RefreshToken,
-		"token_type":    "Bearer",
-		"expires_in":    pair.ExpiresIn,
-		"admin":         admin.ToPublic(),
-	})
+	resp := dto.LoginResponse{
+		TokenPairResponse: dto.TokenPairResponse{
+			AccessToken:  pair.AccessToken,
+			RefreshToken: pair.RefreshToken,
+			TokenType:    "Bearer",
+			ExpiresIn:    pair.ExpiresIn,
+		},
+		Admin: dto.NewAdminResponse(*admin),
+	}
+	utils.OK(w, "Login berhasil", resp)
 }
 
 // Refresh godoc
@@ -140,9 +111,13 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	ip := utils.ClientIP(r)
 
-	var req refreshRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.RefreshToken == "" {
-		utils.Error(w, http.StatusBadRequest, "refresh_token wajib diisi")
+	var req dto.RefreshRequest
+	if err := decodeJSON(r, &req); err != nil {
+		utils.Error(w, http.StatusBadRequest, "Body permintaan tidak valid")
+		return
+	}
+	if err := req.Validate(); err != nil {
+		utils.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -160,11 +135,11 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 		Module: "auth", Action: "token_refresh_success", Status: service.LogStatusSuccess, IP: ip,
 	})
 
-	utils.OK(w, "Token berhasil diperbarui", map[string]any{
-		"access_token":  pair.AccessToken,
-		"refresh_token": pair.RefreshToken,
-		"token_type":    "Bearer",
-		"expires_in":    pair.ExpiresIn,
+	utils.OK(w, "Token berhasil diperbarui", dto.TokenPairResponse{
+		AccessToken:  pair.AccessToken,
+		RefreshToken: pair.RefreshToken,
+		TokenType:    "Bearer",
+		ExpiresIn:    pair.ExpiresIn,
 	})
 }
 
@@ -178,8 +153,12 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req refreshRequest
-	_ = json.NewDecoder(r.Body).Decode(&req) // refresh_token opsional saat logout
+	// refresh_token opsional saat logout - decode manual (bukan decodeJSON)
+	// karena body boleh kosong sepenuhnya, sedangkan decodeJSON dengan
+	// DisallowUnknownFields akan tetap OK untuk body kosong ({}), jadi
+	// tetap aman dipakai di sini.
+	var req dto.RefreshRequest
+	_ = decodeJSON(r, &req) // error diabaikan dengan sengaja - field opsional
 
 	if err := h.authService.Logout(ctx, claims, req.RefreshToken); err != nil {
 		utils.Error(w, http.StatusInternalServerError, "Gagal logout")
@@ -206,18 +185,13 @@ func (h *AuthHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req resetPasswordRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	var req dto.ResetPasswordRequest
+	if err := decodeJSON(r, &req); err != nil {
 		utils.Error(w, http.StatusBadRequest, "Body permintaan tidak valid")
 		return
 	}
-
-	if req.OldPassword == "" || req.NewPassword == "" || req.ConfirmPassword == "" {
-		utils.Error(w, http.StatusBadRequest, "Semua field wajib diisi")
-		return
-	}
-	if req.NewPassword != req.ConfirmPassword {
-		utils.Error(w, http.StatusBadRequest, "Konfirmasi password baru tidak cocok")
+	if err := req.Validate(); err != nil {
+		utils.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if err := utils.ValidatePasswordStrength(req.NewPassword); err != nil {
@@ -275,9 +249,14 @@ func (h *AuthHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 // ForgotPassword godoc
 // POST /api/auth/forgot-password
 func (h *AuthHandler) ForgotPassword(w http.ResponseWriter, r *http.Request) {
-	var req forgotPasswordRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Email == "" {
-		utils.Error(w, http.StatusBadRequest, "Email wajib diisi")
+	var req dto.ForgotPasswordRequest
+	if err := decodeJSON(r, &req); err != nil {
+		utils.Error(w, http.StatusBadRequest, "Body permintaan tidak valid")
+		return
+	}
+	req.Normalize()
+	if err := req.Validate(); err != nil {
+		utils.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -293,9 +272,13 @@ func (h *AuthHandler) ForgotPassword(w http.ResponseWriter, r *http.Request) {
 // ResetPasswordWithCode godoc
 // POST /api/auth/reset-password-code
 func (h *AuthHandler) ResetPasswordWithCode(w http.ResponseWriter, r *http.Request) {
-	var req resetWithCodeRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ResetCode == "" || req.NewPassword == "" {
-		utils.Error(w, http.StatusBadRequest, "Data tidak lengkap")
+	var req dto.ResetWithCodeRequest
+	if err := decodeJSON(r, &req); err != nil {
+		utils.Error(w, http.StatusBadRequest, "Body permintaan tidak valid")
+		return
+	}
+	if err := req.Validate(); err != nil {
+		utils.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if err := h.authService.ResetPasswordWithCode(r.Context(), req.ResetCode, req.NewPassword); err != nil {
@@ -308,9 +291,14 @@ func (h *AuthHandler) ResetPasswordWithCode(w http.ResponseWriter, r *http.Reque
 // Activate godoc
 // POST /api/auth/activate
 func (h *AuthHandler) Activate(w http.ResponseWriter, r *http.Request) {
-	var req activateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Email == "" || req.Token == "" || req.Password == "" {
-		utils.Error(w, http.StatusBadRequest, "Data tidak lengkap")
+	var req dto.ActivateRequest
+	if err := decodeJSON(r, &req); err != nil {
+		utils.Error(w, http.StatusBadRequest, "Body permintaan tidak valid")
+		return
+	}
+	req.Normalize()
+	if err := req.Validate(); err != nil {
+		utils.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if err := h.authService.ActivateAccount(r.Context(), req.Email, req.Token, req.Password); err != nil {
@@ -328,9 +316,9 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 		utils.Error(w, http.StatusUnauthorized, "Tidak terautentikasi")
 		return
 	}
-	utils.OK(w, "OK", map[string]any{
-		"admin_id": claims.AdminID,
-		"email":    claims.Email,
-		"role_id":  claims.RoleID,
+	utils.OK(w, "OK", dto.MeResponse{
+		AdminID: claims.AdminID,
+		Email:   claims.Email,
+		RoleID:  claims.RoleID,
 	})
 }

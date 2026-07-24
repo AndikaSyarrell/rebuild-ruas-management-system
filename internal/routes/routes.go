@@ -179,6 +179,7 @@ func New(d *Dependencies) http.Handler {
 		api.Route("/ppn", func(rt chi.Router) {
 			rt.Get("/", d.PpnHandler.List)
 			rt.Get("/current", d.PpnHandler.Current)
+			rt.Get("/{id}", d.PpnHandler.Detail) // baru
 			rt.With(requireAccess("edit_ppn")).Put("/{id}", d.PpnHandler.Update)
 			rt.With(requireAccess("edit_ppn")).Post("/", d.PpnHandler.Create)
 		})

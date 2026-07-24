@@ -5,6 +5,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"rms-backend/internal/dto"
 	"rms-backend/internal/repository"
 	"rms-backend/internal/utils"
 )
@@ -19,7 +20,7 @@ func (h *UnitHandler) Select(w http.ResponseWriter, r *http.Request) {
 		utils.Error(w, http.StatusInternalServerError, "Gagal mengambil data unit")
 		return
 	}
-	utils.OK(w, "Fetch success", data)
+	utils.OK(w, "Fetch success", dto.NewUnitResponseList(data))
 }
 
 func (h *UnitHandler) List(w http.ResponseWriter, r *http.Request) {
@@ -29,7 +30,7 @@ func (h *UnitHandler) List(w http.ResponseWriter, r *http.Request) {
 		utils.Error(w, http.StatusInternalServerError, "Gagal mengambil data unit")
 		return
 	}
-	utils.JSONMeta(w, http.StatusOK, true, "Fetch success", data, map[string]any{
+	utils.JSONMeta(w, http.StatusOK, true, "Fetch success", dto.NewUnitResponseList(data), map[string]any{
 		"total_data": total, "total_page": utils.TotalPage(total, p.PerPage), "page": p.Page,
 	})
 }
@@ -44,16 +45,17 @@ func (h *UnitHandler) Detail(w http.ResponseWriter, r *http.Request) {
 		utils.Error(w, http.StatusNotFound, "Unit tidak ditemukan")
 		return
 	}
-	utils.OK(w, "Fetch success", data)
-}
-
-type unitRequest struct {
-	Title string `json:"title"`
+	utils.OK(w, "Fetch success", dto.NewUnitResponse(*data))
 }
 
 func (h *UnitHandler) Create(w http.ResponseWriter, r *http.Request) {
-	var req unitRequest
-	if err := decodeJSON(r, &req); err != nil || req.Title == "" {
+	var req dto.TitleRequest
+	if err := decodeJSON(r, &req); err != nil {
+		utils.Error(w, http.StatusBadRequest, "Body permintaan tidak valid")
+		return
+	}
+	req.Normalize()
+	if err := req.Validate(); err != nil {
 		utils.Error(w, http.StatusBadRequest, "Judul unit wajib diisi")
 		return
 	}
@@ -70,8 +72,13 @@ func (h *UnitHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var req unitRequest
-	if err := decodeJSON(r, &req); err != nil || req.Title == "" {
+	var req dto.TitleRequest
+	if err := decodeJSON(r, &req); err != nil {
+		utils.Error(w, http.StatusBadRequest, "Body permintaan tidak valid")
+		return
+	}
+	req.Normalize()
+	if err := req.Validate(); err != nil {
 		utils.Error(w, http.StatusBadRequest, "Judul unit wajib diisi")
 		return
 	}

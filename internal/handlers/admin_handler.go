@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"rms-backend/internal/dto"
 	"rms-backend/internal/repository"
 	"rms-backend/internal/service"
 	"rms-backend/internal/utils"
@@ -35,11 +36,7 @@ func (h *AdminHandler) List(w http.ResponseWriter, r *http.Request) {
 		utils.Error(w, http.StatusInternalServerError, "Gagal mengambil data admin")
 		return
 	}
-	public := make([]any, 0, len(data))
-	for i := range data {
-		public = append(public, data[i].ToPublic())
-	}
-	utils.JSONMeta(w, http.StatusOK, true, "Fetch success", public, map[string]any{
+	utils.JSONMeta(w, http.StatusOK, true, "Fetch success", dto.NewAdminResponseList(data), map[string]any{
 		"total_data": total, "total_page": utils.TotalPage(total, p.PerPage), "page": p.Page,
 	})
 }
@@ -51,21 +48,17 @@ func (h *AdminHandler) Detail(w http.ResponseWriter, r *http.Request) {
 		utils.Error(w, http.StatusNotFound, "Admin tidak ditemukan")
 		return
 	}
-	utils.OK(w, "Fetch success", admin.ToPublic())
+	utils.OK(w, "Fetch success", dto.NewAdminResponse(*admin))
 }
 
-// GET /api/admins/pic  - kandidat PIC internal (untuk dropdown pembuatan PO)
+// GET /api/admins/pic
 func (h *AdminHandler) ListPIC(w http.ResponseWriter, r *http.Request) {
 	data, err := h.repo.ListPIC(r.Context())
 	if err != nil {
 		utils.Error(w, http.StatusInternalServerError, "Gagal mengambil data PIC")
 		return
 	}
-	out := make([]any, 0, len(data))
-	for i := range data {
-		out = append(out, data[i].ToPublic())
-	}
-	utils.OK(w, "Fetch success", out)
+	utils.OK(w, "Fetch success", dto.NewAdminResponseList(data))
 }
 
 // GET /api/admins/pic-client
@@ -75,35 +68,20 @@ func (h *AdminHandler) ListPICClient(w http.ResponseWriter, r *http.Request) {
 		utils.Error(w, http.StatusInternalServerError, "Gagal mengambil data PIC client")
 		return
 	}
-	out := make([]any, 0, len(data))
-	for i := range data {
-		out = append(out, data[i].ToPublic())
-	}
-	utils.OK(w, "Fetch success", out)
+	utils.OK(w, "Fetch success", dto.NewAdminResponseList(data))
 }
 
-type createAdminRequest struct {
-	Email     string         `json:"email"`
-	Name      string         `json:"username"`
-	RoleID    *utils.FlexInt `json:"role_id"`
-	RegionID  utils.FlexInt  `json:"region_id"`
-	Pic       string         `json:"pic"`
-	PicClient string         `json:"pic_client"`
-}
-
-// POST /api/admins  - membuat admin baru berstatus inactive lalu mengirim email aktivasi
+// POST /api/admins
 func (h *AdminHandler) Create(w http.ResponseWriter, r *http.Request) {
-	var req createAdminRequest
-	if err := decodeJSON(r, &req); err != nil || req.Email == "" || req.Name == "" || int(req.RegionID) == 0 {
-		utils.Error(w, http.StatusBadRequest, "Data admin tidak lengkap")
+	var req dto.CreateAdminRequest
+	if err := decodeJSON(r, &req); err != nil {
+		utils.Error(w, http.StatusBadRequest, "Body permintaan tidak valid")
 		return
 	}
-	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
-	if req.Pic == "" {
-		req.Pic = "no"
-	}
-	if req.PicClient == "" {
-		req.PicClient = "no"
+	req.Normalize()
+	if err := req.Validate(); err != nil {
+		utils.Error(w, http.StatusBadRequest, err.Error())
+		return
 	}
 
 	exists, err := h.repo.EmailExists(r.Context(), req.Email)
@@ -119,13 +97,7 @@ func (h *AdminHandler) Create(w http.ResponseWriter, r *http.Request) {
 	id := utils.GenerateSequentialID("ADM")
 	token := utils.RandomHex(20)
 
-	var roleID *int
-	if req.RoleID != nil {
-		v := int(*req.RoleID)
-		roleID = &v
-	}
-
-	if err := h.repo.Create(r.Context(), id, req.Email, req.Name, int(req.RegionID), roleID, token, req.Pic, req.PicClient); err != nil {
+	if err := h.repo.Create(r.Context(), id, req.Email, req.Name, int(req.RegionID), req.RoleIDPtr(), token, req.Pic, req.PicClient); err != nil {
 		utils.Error(w, http.StatusInternalServerError, "Gagal membuat admin")
 		return
 	}
@@ -145,24 +117,19 @@ func (h *AdminHandler) Create(w http.ResponseWriter, r *http.Request) {
 	utils.Created(w, "Admin berhasil dibuat, email aktivasi telah dikirim", map[string]any{"admin_id": id})
 }
 
-type updateAdminRequest struct {
-	Email     string         `json:"email"`
-	Name      string         `json:"username"`
-	RoleID    *utils.FlexInt `json:"role_id"`
-	RegionID  utils.FlexInt  `json:"region_id"`
-	Pic       string         `json:"pic"`
-	PicClient string         `json:"pic_client"`
-}
-
 // PUT /api/admins/{id}
 func (h *AdminHandler) Update(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	var req updateAdminRequest
-	if err := decodeJSON(r, &req); err != nil || req.Email == "" || req.Name == "" {
-		utils.Error(w, http.StatusBadRequest, "Data admin tidak lengkap")
+	var req dto.UpdateAdminRequest
+	if err := decodeJSON(r, &req); err != nil {
+		utils.Error(w, http.StatusBadRequest, "Body permintaan tidak valid")
 		return
 	}
-	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
+	req.Normalize()
+	if err := req.Validate(); err != nil {
+		utils.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	current, err := h.repo.GetByID(r.Context(), id)
 	if err != nil {
@@ -181,13 +148,7 @@ func (h *AdminHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	var roleID *int
-	if req.RoleID != nil {
-		v := int(*req.RoleID)
-		roleID = &v
-	}
-
-	if err := h.repo.Update(r.Context(), id, roleID, req.Email, req.Name, req.Pic, req.PicClient, int(req.RegionID)); err != nil {
+	if err := h.repo.Update(r.Context(), id, req.RoleIDPtr(), req.Email, req.Name, req.Pic, req.PicClient, int(req.RegionID)); err != nil {
 		utils.Error(w, http.StatusInternalServerError, "Gagal memperbarui admin")
 		return
 	}
@@ -230,9 +191,6 @@ func (h *AdminHandler) UploadImage(w http.ResponseWriter, r *http.Request) {
 	utils.OK(w, "Foto berhasil diperbarui", map[string]any{"image": imgPath, "image_thumb": thumbPath})
 }
 
-// saveAdminImage menyimpan file asli sebagai foto profil dan (untuk saat ini)
-// memakai file yang sama sebagai thumbnail. Resizing sesungguhnya sebaiknya
-// dilakukan di reverse-proxy/CDN atau worker terpisah, bukan di request path.
 func (h *AdminHandler) saveAdminImage(file multipart.File, ext string) (string, string, error) {
 	if err := os.MkdirAll(filepath.Join(h.uploadDir, "admin"), 0o755); err != nil {
 		return "", "", err

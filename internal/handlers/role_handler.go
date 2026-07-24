@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"rms-backend/internal/dto"
 	"rms-backend/internal/repository"
 	"rms-backend/internal/utils"
 )
@@ -26,7 +27,7 @@ func (h *RoleHandler) List(w http.ResponseWriter, r *http.Request) {
 		utils.Error(w, http.StatusInternalServerError, "Gagal mengambil data role")
 		return
 	}
-	utils.JSONMeta(w, http.StatusOK, true, "Fetch success", data, map[string]any{
+	utils.JSONMeta(w, http.StatusOK, true, "Fetch success", dto.NewRoleResponseList(data), map[string]any{
 		"total_data": total, "total_page": utils.TotalPage(total, p.PerPage), "page": p.Page,
 	})
 }
@@ -37,10 +38,10 @@ func (h *RoleHandler) Select(w http.ResponseWriter, r *http.Request) {
 		utils.Error(w, http.StatusInternalServerError, "Gagal mengambil data role")
 		return
 	}
-	utils.OK(w, "Fetch success", data)
+	utils.OK(w, "Fetch success", dto.NewRoleResponseList(data))
 }
 
-// GET /api/roles/{id}  - detail role beserta daftar access_id yang dimiliki
+// GET /api/roles/{id}
 func (h *RoleHandler) Detail(w http.ResponseWriter, r *http.Request) {
 	id, ok := utils.ParseIDParam(w, chi.URLParam(r, "id"))
 	if !ok {
@@ -56,7 +57,7 @@ func (h *RoleHandler) Detail(w http.ResponseWriter, r *http.Request) {
 		utils.Error(w, http.StatusInternalServerError, "Gagal mengambil daftar akses role")
 		return
 	}
-	utils.OK(w, "Fetch success", map[string]any{"role": role, "access_ids": accessIDs})
+	utils.OK(w, "Fetch success", dto.NewRoleDetailResponse(*role, accessIDs))
 }
 
 func slugify(title string) string {
@@ -65,15 +66,16 @@ func slugify(title string) string {
 	return s
 }
 
-type roleRequest struct {
-	Title     string          `json:"title"`
-	AccessIDs []utils.FlexInt `json:"access_ids"`
-}
-
+// POST /api/roles
 func (h *RoleHandler) Create(w http.ResponseWriter, r *http.Request) {
-	var req roleRequest
-	if err := decodeJSON(r, &req); err != nil || req.Title == "" {
-		utils.Error(w, http.StatusBadRequest, "Judul role wajib diisi")
+	var req dto.RoleRequest
+	if err := decodeJSON(r, &req); err != nil {
+		utils.Error(w, http.StatusBadRequest, "Body permintaan tidak valid")
+		return
+	}
+	req.Normalize()
+	if err := req.Validate(); err != nil {
+		utils.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	slug := slugify(req.Title)
@@ -83,11 +85,7 @@ func (h *RoleHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(req.AccessIDs) > 0 {
-		accessIDs := make([]int, len(req.AccessIDs))
-		for i, a := range req.AccessIDs {
-			accessIDs[i] = int(a)
-		}
-		if err := h.accessRepo.ReplaceRoleAccess(r.Context(), int(id), accessIDs); err != nil {
+		if err := h.accessRepo.ReplaceRoleAccess(r.Context(), int(id), req.AccessIDInts()); err != nil {
 			utils.Error(w, http.StatusInternalServerError, "Role dibuat, namun gagal menyimpan daftar akses")
 			return
 		}
@@ -95,14 +93,20 @@ func (h *RoleHandler) Create(w http.ResponseWriter, r *http.Request) {
 	utils.Created(w, "Role berhasil dibuat", map[string]any{"role_id": id})
 }
 
+// PUT /api/roles/{id}
 func (h *RoleHandler) Update(w http.ResponseWriter, r *http.Request) {
 	id, ok := utils.ParseIDParam(w, chi.URLParam(r, "id"))
 	if !ok {
 		return
 	}
-	var req roleRequest
-	if err := decodeJSON(r, &req); err != nil || req.Title == "" {
-		utils.Error(w, http.StatusBadRequest, "Judul role wajib diisi")
+	var req dto.RoleRequest
+	if err := decodeJSON(r, &req); err != nil {
+		utils.Error(w, http.StatusBadRequest, "Body permintaan tidak valid")
+		return
+	}
+	req.Normalize()
+	if err := req.Validate(); err != nil {
+		utils.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	slug := slugify(req.Title)
@@ -110,11 +114,7 @@ func (h *RoleHandler) Update(w http.ResponseWriter, r *http.Request) {
 		utils.Error(w, http.StatusInternalServerError, "Gagal memperbarui role")
 		return
 	}
-	accessIDs := make([]int, len(req.AccessIDs))
-	for i, a := range req.AccessIDs {
-		accessIDs[i] = int(a)
-	}
-	if err := h.accessRepo.ReplaceRoleAccess(r.Context(), id, accessIDs); err != nil {
+	if err := h.accessRepo.ReplaceRoleAccess(r.Context(), id, req.AccessIDInts()); err != nil {
 		utils.Error(w, http.StatusInternalServerError, "Role diperbarui, namun gagal menyimpan daftar akses")
 		return
 	}

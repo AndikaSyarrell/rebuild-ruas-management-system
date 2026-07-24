@@ -5,6 +5,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"rms-backend/internal/dto"
 	"rms-backend/internal/repository"
 	"rms-backend/internal/utils"
 )
@@ -20,12 +21,12 @@ func (h *AccessHandler) List(w http.ResponseWriter, r *http.Request) {
 		utils.Error(w, http.StatusInternalServerError, "Gagal mengambil data akses")
 		return
 	}
-	utils.JSONMeta(w, http.StatusOK, true, "Fetch success", data, map[string]any{
+	utils.JSONMeta(w, http.StatusOK, true, "Fetch success", dto.NewAccessResponseList(data), map[string]any{
 		"total_data": total, "total_page": utils.TotalPage(total, p.PerPage), "page": p.Page,
 	})
 }
 
-// GET /api/access/module/{module}  - dipakai membangun form checklist per-modul di halaman Role
+// GET /api/access/module/{module}
 func (h *AccessHandler) ListByModule(w http.ResponseWriter, r *http.Request) {
 	module := chi.URLParam(r, "module")
 	data, err := h.repo.ListByModule(r.Context(), module)
@@ -33,7 +34,7 @@ func (h *AccessHandler) ListByModule(w http.ResponseWriter, r *http.Request) {
 		utils.Error(w, http.StatusInternalServerError, "Gagal mengambil data akses")
 		return
 	}
-	utils.OK(w, "Fetch success", data)
+	utils.OK(w, "Fetch success", dto.NewAccessResponseList(data))
 }
 
 func (h *AccessHandler) Detail(w http.ResponseWriter, r *http.Request) {
@@ -46,19 +47,18 @@ func (h *AccessHandler) Detail(w http.ResponseWriter, r *http.Request) {
 		utils.Error(w, http.StatusNotFound, "Akses tidak ditemukan")
 		return
 	}
-	utils.OK(w, "Fetch success", data)
-}
-
-type accessRequest struct {
-	Title  string `json:"title"`
-	Module string `json:"module"`
-	Slug   string `json:"slug"`
+	utils.OK(w, "Fetch success", dto.NewAccessResponse(*data))
 }
 
 func (h *AccessHandler) Create(w http.ResponseWriter, r *http.Request) {
-	var req accessRequest
-	if err := decodeJSON(r, &req); err != nil || req.Title == "" || req.Module == "" || req.Slug == "" {
-		utils.Error(w, http.StatusBadRequest, "Data akses tidak lengkap")
+	var req dto.AccessRequest
+	if err := decodeJSON(r, &req); err != nil {
+		utils.Error(w, http.StatusBadRequest, "Body permintaan tidak valid")
+		return
+	}
+	req.Normalize()
+	if err := req.Validate(); err != nil {
+		utils.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	id, err := h.repo.Create(r.Context(), req.Title, req.Module, req.Slug)
@@ -74,9 +74,14 @@ func (h *AccessHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var req accessRequest
-	if err := decodeJSON(r, &req); err != nil || req.Title == "" || req.Module == "" || req.Slug == "" {
-		utils.Error(w, http.StatusBadRequest, "Data akses tidak lengkap")
+	var req dto.AccessRequest
+	if err := decodeJSON(r, &req); err != nil {
+		utils.Error(w, http.StatusBadRequest, "Body permintaan tidak valid")
+		return
+	}
+	req.Normalize()
+	if err := req.Validate(); err != nil {
+		utils.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if err := h.repo.Update(r.Context(), id, req.Title, req.Module, req.Slug); err != nil {

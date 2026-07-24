@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"rms-backend/internal/repository"
+	"rms-backend/internal/dto"
 	"rms-backend/internal/utils"
 )
 
@@ -52,7 +53,7 @@ func (h *DocumentHandler) ListByPO(w http.ResponseWriter, r *http.Request) {
 		utils.Error(w, http.StatusInternalServerError, "Gagal mengambil daftar dokumen")
 		return
 	}
-	utils.OK(w, "Fetch success", data)
+	utils.OK(w, "Fetch success", dto.NewDocumentResponseList(data))
 }
 
 // POST /api/po/{id}/documents  (multipart/form-data: file, title)

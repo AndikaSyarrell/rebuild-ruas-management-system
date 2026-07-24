@@ -5,6 +5,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"rms-backend/internal/dto"
 	"rms-backend/internal/repository"
 	"rms-backend/internal/utils"
 )
@@ -23,7 +24,7 @@ func (h *ActivityHandler) ListByPO(w http.ResponseWriter, r *http.Request) {
 		utils.Error(w, http.StatusInternalServerError, "Gagal mengambil aktivitas PO")
 		return
 	}
-	utils.OK(w, "Fetch success", data)
+	utils.OK(w, "Fetch success", dto.NewActivityResponseList(data))
 }
 
 // GET /api/activities/dashboard
@@ -34,7 +35,7 @@ func (h *ActivityHandler) Dashboard(w http.ResponseWriter, r *http.Request) {
 		utils.Error(w, http.StatusInternalServerError, "Gagal mengambil aktivitas terbaru")
 		return
 	}
-	utils.JSONMeta(w, http.StatusOK, true, "Fetch success", data, map[string]any{
+	utils.JSONMeta(w, http.StatusOK, true, "Fetch success", dto.NewActivityResponseList(data), map[string]any{
 		"total_data": total, "total_page": utils.TotalPage(total, p.PerPage), "page": p.Page,
 	})
 }
@@ -43,7 +44,7 @@ type noteRequest struct {
 	Note string `json:"note"`
 }
 
-// POST /api/po/{id}/notes-activity  - catatan bebas (bukan po_notes header, tapi entri activity type "notes")
+// POST /api/po/{id}/notes-activity
 func (h *ActivityHandler) AddNote(w http.ResponseWriter, r *http.Request) {
 	poID := chi.URLParam(r, "id")
 	var req noteRequest

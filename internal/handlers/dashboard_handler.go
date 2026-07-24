@@ -3,6 +3,7 @@ package handlers
 import (
 	"net/http"
 
+	"rms-backend/internal/dto"
 	"rms-backend/internal/repository"
 	"rms-backend/internal/utils"
 )
@@ -44,6 +45,6 @@ func (h *DashboardHandler) Summary(w http.ResponseWriter, r *http.Request) {
 		"total_prepared": counts["prepared"],
 		"total_complete": counts["complete"],
 		"total_cancel":   counts["cancel"],
-		"recent_open_po": recent,
+		"recent_open_po": dto.NewPOListItemResponseList(recent),
 	})
 }

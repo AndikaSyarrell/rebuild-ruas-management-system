@@ -2,10 +2,10 @@ package handlers
 
 import (
 	"net/http"
-	"strings"
 
 	"github.com/go-chi/chi/v5"
 
+	"rms-backend/internal/dto"
 	"rms-backend/internal/repository"
 	"rms-backend/internal/utils"
 )
@@ -22,7 +22,7 @@ func (h *ClientHandler) Select(w http.ResponseWriter, r *http.Request) {
 		utils.Error(w, http.StatusInternalServerError, "Gagal mengambil data klien")
 		return
 	}
-	utils.OK(w, "Fetch success", data)
+	utils.OK(w, "Fetch success", dto.NewClientSelectResponseList(data))
 }
 
 // GET /api/clients?region=&keyword=
@@ -36,7 +36,7 @@ func (h *ClientHandler) List(w http.ResponseWriter, r *http.Request) {
 		utils.Error(w, http.StatusInternalServerError, "Gagal mengambil data klien")
 		return
 	}
-	utils.JSONMeta(w, http.StatusOK, true, "Fetch success", data, map[string]any{
+	utils.JSONMeta(w, http.StatusOK, true, "Fetch success", dto.NewClientResponseList(data), map[string]any{
 		"total_data": total, "total_page": utils.TotalPage(total, p.PerPage), "page": p.Page,
 	})
 }
@@ -51,24 +51,20 @@ func (h *ClientHandler) Detail(w http.ResponseWriter, r *http.Request) {
 		utils.Error(w, http.StatusNotFound, "Klien tidak ditemukan")
 		return
 	}
-	utils.OK(w, "Fetch success", data)
-}
-
-type clientRequest struct {
-	Name     string        `json:"name"`
-	Email    string        `json:"email"`
-	Phone    string        `json:"phone"`
-	Address  string        `json:"address"`
-	RegionID utils.FlexInt `json:"region_id"`
+	utils.OK(w, "Fetch success", dto.NewClientResponse(*data))
 }
 
 func (h *ClientHandler) Create(w http.ResponseWriter, r *http.Request) {
-	var req clientRequest
-	if err := decodeJSON(r, &req); err != nil || req.Name == "" || req.Email == "" || int(req.RegionID) == 0 {
-		utils.Error(w, http.StatusBadRequest, "Data klien tidak lengkap")
+	var req dto.ClientRequest
+	if err := decodeJSON(r, &req); err != nil {
+		utils.Error(w, http.StatusBadRequest, "Body permintaan tidak valid")
 		return
 	}
-	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
+	req.Normalize()
+	if err := req.Validate(); err != nil {
+		utils.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	exists, err := h.repo.EmailExists(r.Context(), req.Email)
 	if err != nil {
@@ -93,12 +89,16 @@ func (h *ClientHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var req clientRequest
-	if err := decodeJSON(r, &req); err != nil || req.Name == "" || req.Email == "" {
-		utils.Error(w, http.StatusBadRequest, "Data klien tidak lengkap")
+	var req dto.ClientRequest
+	if err := decodeJSON(r, &req); err != nil {
+		utils.Error(w, http.StatusBadRequest, "Body permintaan tidak valid")
 		return
 	}
-	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
+	req.Normalize()
+	if err := req.Validate(); err != nil {
+		utils.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	current, err := h.repo.GetByID(r.Context(), id)
 	if err != nil {

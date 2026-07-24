@@ -5,6 +5,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"rms-backend/internal/dto"
 	"rms-backend/internal/repository"
 	"rms-backend/internal/utils"
 )
@@ -21,7 +22,7 @@ func (h *DivisionHandler) Select(w http.ResponseWriter, r *http.Request) {
 		utils.Error(w, http.StatusInternalServerError, "Gagal mengambil data divisi")
 		return
 	}
-	utils.OK(w, "Fetch success", data)
+	utils.OK(w, "Fetch success", dto.NewDivisionResponseList(data))
 }
 
 func (h *DivisionHandler) List(w http.ResponseWriter, r *http.Request) {
@@ -31,7 +32,7 @@ func (h *DivisionHandler) List(w http.ResponseWriter, r *http.Request) {
 		utils.Error(w, http.StatusInternalServerError, "Gagal mengambil data divisi")
 		return
 	}
-	utils.JSONMeta(w, http.StatusOK, true, "Fetch success", data, map[string]any{
+	utils.JSONMeta(w, http.StatusOK, true, "Fetch success", dto.NewDivisionResponseList(data), map[string]any{
 		"total_data": total, "total_page": utils.TotalPage(total, p.PerPage), "page": p.Page,
 	})
 }
@@ -46,16 +47,17 @@ func (h *DivisionHandler) Detail(w http.ResponseWriter, r *http.Request) {
 		utils.Error(w, http.StatusNotFound, "Divisi tidak ditemukan")
 		return
 	}
-	utils.OK(w, "Fetch success", data)
-}
-
-type divisionRequest struct {
-	Title string `json:"title"`
+	utils.OK(w, "Fetch success", dto.NewDivisionResponse(*data))
 }
 
 func (h *DivisionHandler) Create(w http.ResponseWriter, r *http.Request) {
-	var req divisionRequest
-	if err := decodeJSON(r, &req); err != nil || req.Title == "" {
+	var req dto.TitleRequest
+	if err := decodeJSON(r, &req); err != nil {
+		utils.Error(w, http.StatusBadRequest, "Body permintaan tidak valid")
+		return
+	}
+	req.Normalize()
+	if err := req.Validate(); err != nil {
 		utils.Error(w, http.StatusBadRequest, "Judul divisi wajib diisi")
 		return
 	}
@@ -72,8 +74,13 @@ func (h *DivisionHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var req divisionRequest
-	if err := decodeJSON(r, &req); err != nil || req.Title == "" {
+	var req dto.TitleRequest
+	if err := decodeJSON(r, &req); err != nil {
+		utils.Error(w, http.StatusBadRequest, "Body permintaan tidak valid")
+		return
+	}
+	req.Normalize()
+	if err := req.Validate(); err != nil {
 		utils.Error(w, http.StatusBadRequest, "Judul divisi wajib diisi")
 		return
 	}

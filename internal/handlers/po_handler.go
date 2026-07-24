@@ -6,10 +6,10 @@ import (
 	"net/http"
 	"os"
 	"time"
-	"log"
 
 	"github.com/go-chi/chi/v5"
 
+	"rms-backend/internal/dto"
 	"rms-backend/internal/repository"
 	"rms-backend/internal/service"
 	"rms-backend/internal/utils"
@@ -66,17 +66,12 @@ func (h *POHandler) List(w http.ResponseWriter, r *http.Request) {
 		utils.Error(w, http.StatusInternalServerError, "Gagal mengambil data PO")
 		return
 	}
-	utils.JSONMeta(w, http.StatusOK, true, "Fetch success", data, map[string]any{
+	utils.JSONMeta(w, http.StatusOK, true, "Fetch success", dto.NewPOListItemResponseList(data), map[string]any{
 		"total_data": total, "total_page": utils.TotalPage(total, p.PerPage), "page": p.Page,
 	})
 }
 
-// GET /api/po/export?start_date=&end_date=&division=&status=&region=&client=
-//
-// Export breakdown per-item (1 baris = 1 item PO) ke .xlsx. Hasil di-cache di
-// disk selama TTL (lihat PO_EXPORT_TTL) berdasarkan kombinasi filter -
-// permintaan berikutnya dengan filter identik dalam TTL yang sama langsung
-// disajikan dari file cache tanpa query ulang ke database.
+// GET /api/po/export?...
 func (h *POHandler) Export(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	filter := repository.ExportFilter{
@@ -89,11 +84,10 @@ func (h *POHandler) Export(w http.ResponseWriter, r *http.Request) {
 	}
 
 	path, cacheHit, err := h.exportService.GetOrGenerate(r.Context(), filter)
-if err != nil {
-    log.Printf("export PO failed: %v", err) // TEMP: see internal/handlers/po_handler.go imports, add "log"
-    utils.Error(w, http.StatusInternalServerError, "Gagal membuat file export")
-    return
-}
+	if err != nil {
+		utils.Error(w, http.StatusInternalServerError, "Gagal membuat file export")
+		return
+	}
 
 	f, err := os.Open(path)
 	if err != nil {
@@ -114,7 +108,7 @@ if err != nil {
 	io.Copy(w, f)
 }
 
-// GET /api/po/total?...  - ringkasan jumlah per status untuk badge
+// GET /api/po/total?...
 func (h *POHandler) Total(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	regionID := utils.AtoiDefault(q.Get("region"), 0)
@@ -145,48 +139,21 @@ func (h *POHandler) Detail(w http.ResponseWriter, r *http.Request) {
 		utils.Error(w, http.StatusInternalServerError, "Gagal mengambil item PO")
 		return
 	}
-	utils.OK(w, "Fetch success", map[string]any{"po": po, "items": items})
-}
-
-type createPOItemRequest struct {
-	Desc    string          `json:"desc"`
-	Product string          `json:"product"`
-	Qty     utils.FlexInt   `json:"qty"`
-	UnitID  utils.FlexInt   `json:"unit_id"`
-	Price   utils.FlexFloat `json:"price"`
-}
-
-type createPORequest struct {
-	OrderNum    string                `json:"order_num"`
-	RegionID    utils.FlexInt         `json:"region_id"`
-	PicID       string                `json:"pic_id"`
-	DivisionID  *utils.FlexInt        `json:"division_id"`
-	PpnID       utils.FlexInt         `json:"ppn_id"`
-	Date        string                `json:"date"`
-	ClientID    utils.FlexInt         `json:"client_id"`
-	ClientName  string                `json:"client_name"`
-	ClientEmail string                `json:"client_email"`
-	ClientPhone string                `json:"client_phone"`
-	ClientAddr  string                `json:"client_address"`
-	SubClient   string                `json:"sub_client"`
-	Items       []createPOItemRequest `json:"items"`
+	utils.OK(w, "Fetch success", dto.NewPOWithItemsResponse(*po, items))
 }
 
 // POST /api/po
 func (h *POHandler) Create(w http.ResponseWriter, r *http.Request) {
-	var req createPORequest
+	var req dto.CreatePORequest
 	if err := decodeJSON(r, &req); err != nil {
-		utils.Error(w, http.StatusBadRequest, "Body permintaan tidak valid: "+err.Error())
+		utils.Error(w, http.StatusBadRequest, "Body permintaan tidak valid")
 		return
 	}
-	regionID := int(req.RegionID)
-	clientID := int(req.ClientID)
-	ppnID := int(req.PpnID)
+	if err := req.Validate(); err != nil {
+		utils.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
-	if req.OrderNum == "" || regionID == 0 || req.PicID == "" || len(req.Items) == 0 {
-		utils.Error(w, http.StatusBadRequest, "Nomor PO, region, PIC, dan minimal 1 item wajib diisi")
-		return
-	}
 	date := utils.ParseDateParam(req.Date)
 	if date == "" {
 		utils.Error(w, http.StatusBadRequest, "Tanggal PO tidak valid")
@@ -203,6 +170,7 @@ func (h *POHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	clientID := int(req.ClientID)
 	if clientID == 0 {
 		if req.ClientEmail == "" || req.ClientName == "" {
 			utils.Error(w, http.StatusBadRequest, "Data klien tidak lengkap")
@@ -235,7 +203,7 @@ func (h *POHandler) Create(w http.ResponseWriter, r *http.Request) {
 		req.ClientAddr = existingClient.Address
 	}
 
-	ppn, err := h.ppnRepo.GetByID(r.Context(), ppnID)
+	ppn, err := h.ppnRepo.GetByID(r.Context(), int(req.PpnID))
 	if err != nil {
 		utils.Error(w, http.StatusBadRequest, "Tarif PPN tidak valid")
 		return
@@ -244,28 +212,16 @@ func (h *POHandler) Create(w http.ResponseWriter, r *http.Request) {
 	adminID, _ := actorFromContext(r.Context())
 	poID := utils.GenerateSequentialID("PO")
 
-	var divisionID *int
-	if req.DivisionID != nil {
-		v := int(*req.DivisionID)
-		divisionID = &v
-	}
-
 	items := make([]repository.NewPOItemInput, 0, len(req.Items))
 	for _, it := range req.Items {
-		qty := int(it.Qty)
-		unitID := int(it.UnitID)
-		if it.Product == "" || qty <= 0 || unitID == 0 {
-			utils.Error(w, http.StatusBadRequest, "Setiap item wajib memiliki produk, qty, dan satuan yang valid")
-			return
-		}
 		items = append(items, repository.NewPOItemInput{
-			Desc: it.Desc, Product: it.Product, Qty: qty, UnitID: unitID, Price: float64(it.Price),
+			Desc: it.Desc, Product: it.Product, Qty: int(it.Qty), UnitID: int(it.UnitID), Price: float64(it.Price),
 		})
 	}
 
 	in := repository.NewPOInput{
-		ID: poID, OrderNum: req.OrderNum, RegionID: regionID, AdminID: adminID, PicID: req.PicID,
-		DivisionID: divisionID, PpnID: ppnID, PpnRate: ppn.Value, Date: date,
+		ID: poID, OrderNum: req.OrderNum, RegionID: int(req.RegionID), AdminID: adminID, PicID: req.PicID,
+		DivisionID: req.DivisionIDPtr(), PpnID: int(req.PpnID), PpnRate: ppn.Value, Date: date,
 		ClientID: clientID, ClientName: req.ClientName, ClientEmail: req.ClientEmail,
 		ClientPhone: req.ClientPhone, ClientAddr: req.ClientAddr, SubClient: req.SubClient, Items: items,
 	}
@@ -279,26 +235,16 @@ func (h *POHandler) Create(w http.ResponseWriter, r *http.Request) {
 	utils.Created(w, "PO berhasil dibuat", map[string]any{"po_id": poID})
 }
 
-type updatePORequest struct {
-	OrderNum    string `json:"order_num"`
-	RegionID    int    `json:"region_id"`
-	PicID       string `json:"pic_id"`
-	DivisionID  *int   `json:"division_id"`
-	Date        string `json:"date"`
-	ClientID    int    `json:"client_id"`
-	ClientName  string `json:"client_name"`
-	ClientEmail string `json:"client_email"`
-	ClientPhone string `json:"client_phone"`
-	ClientAddr  string `json:"client_address"`
-	SubClient   string `json:"sub_client"`
-}
-
 // PUT /api/po/{id}
 func (h *POHandler) Update(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	var req updatePORequest
-	if err := decodeJSON(r, &req); err != nil || req.OrderNum == "" {
-		utils.Error(w, http.StatusBadRequest, "Data PO tidak lengkap")
+	var req dto.UpdatePORequest
+	if err := decodeJSON(r, &req); err != nil {
+		utils.Error(w, http.StatusBadRequest, "Body permintaan tidak valid")
+		return
+	}
+	if err := req.Validate(); err != nil {
+		utils.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	date := utils.ParseDateParam(req.Date)
@@ -321,8 +267,8 @@ func (h *POHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	err = h.repo.UpdateHeader(r.Context(), id, repository.UpdatePOInput{
-		OrderNum: req.OrderNum, RegionID: req.RegionID, PicID: req.PicID, DivisionID: req.DivisionID,
-		Date: date, ClientID: req.ClientID, ClientName: req.ClientName, ClientEmail: req.ClientEmail,
+		OrderNum: req.OrderNum, RegionID: int(req.RegionID), PicID: req.PicID, DivisionID: req.DivisionIDPtr(),
+		Date: date, ClientID: int(req.ClientID), ClientName: req.ClientName, ClientEmail: req.ClientEmail,
 		ClientPhone: req.ClientPhone, ClientAddr: req.ClientAddr, SubClient: req.SubClient,
 	})
 	if err != nil {
@@ -334,15 +280,16 @@ func (h *POHandler) Update(w http.ResponseWriter, r *http.Request) {
 	utils.OK(w, "PO berhasil diperbarui", nil)
 }
 
-// POST /api/po/{id}/status  {"status": "progress"}
+// POST /api/po/{id}/status
 func (h *POHandler) ChangeStatus(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	var req struct {
-		Status string `json:"status"`
+	var req dto.ChangeStatusRequest
+	if err := decodeJSON(r, &req); err != nil {
+		utils.Error(w, http.StatusBadRequest, "Body permintaan tidak valid")
+		return
 	}
-	valid := map[string]bool{"open": true, "progress": true, "prepared": true, "complete": true, "cancel": true}
-	if err := decodeJSON(r, &req); err != nil || !valid[req.Status] {
-		utils.Error(w, http.StatusBadRequest, "Status tidak valid")
+	if err := req.Validate(); err != nil {
+		utils.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if err := h.repo.ChangeStatus(r.Context(), id, req.Status); err != nil {
@@ -353,14 +300,16 @@ func (h *POHandler) ChangeStatus(w http.ResponseWriter, r *http.Request) {
 	utils.OK(w, "Status PO berhasil diperbarui", nil)
 }
 
-// POST /api/po/{id}/paid  {"paid": "yes"}
+// POST /api/po/{id}/paid
 func (h *POHandler) ChangePaid(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	var req struct {
-		Paid string `json:"paid"`
+	var req dto.ChangePaidRequest
+	if err := decodeJSON(r, &req); err != nil {
+		utils.Error(w, http.StatusBadRequest, "Body permintaan tidak valid")
+		return
 	}
-	if err := decodeJSON(r, &req); err != nil || (req.Paid != "yes" && req.Paid != "no") {
-		utils.Error(w, http.StatusBadRequest, "Status pembayaran tidak valid")
+	if err := req.Validate(); err != nil {
+		utils.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if err := h.repo.ChangePaid(r.Context(), id, req.Paid); err != nil {
@@ -375,14 +324,16 @@ func (h *POHandler) ChangePaid(w http.ResponseWriter, r *http.Request) {
 	utils.OK(w, "Status pembayaran berhasil diperbarui", nil)
 }
 
-// POST /api/po/{id}/invoice  {"invoice": "..."}
+// POST /api/po/{id}/invoice
 func (h *POHandler) UpdateInvoice(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	var req struct {
-		Invoice string `json:"invoice"`
+	var req dto.UpdateInvoiceRequest
+	if err := decodeJSON(r, &req); err != nil {
+		utils.Error(w, http.StatusBadRequest, "Body permintaan tidak valid")
+		return
 	}
-	if err := decodeJSON(r, &req); err != nil || req.Invoice == "" {
-		utils.Error(w, http.StatusBadRequest, "Nomor invoice wajib diisi")
+	if err := req.Validate(); err != nil {
+		utils.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if err := h.repo.UpdateInvoice(r.Context(), id, req.Invoice); err != nil {
@@ -393,12 +344,10 @@ func (h *POHandler) UpdateInvoice(w http.ResponseWriter, r *http.Request) {
 	utils.OK(w, "Invoice berhasil diperbarui", nil)
 }
 
-// POST /api/po/{id}/notes  {"notes": "..."}
+// POST /api/po/{id}/notes
 func (h *POHandler) UpdateNotes(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	var req struct {
-		Notes string `json:"notes"`
-	}
+	var req dto.UpdateNotesRequest
 	if err := decodeJSON(r, &req); err != nil {
 		utils.Error(w, http.StatusBadRequest, "Body permintaan tidak valid")
 		return
@@ -431,23 +380,19 @@ func (h *POHandler) ListItems(w http.ResponseWriter, r *http.Request) {
 		utils.Error(w, http.StatusInternalServerError, "Gagal mengambil item PO")
 		return
 	}
-	utils.OK(w, "Fetch success", items)
-}
-
-type itemRequest struct {
-	Desc    string          `json:"desc"`
-	Product string          `json:"product"`
-	Qty     utils.FlexInt   `json:"qty"`
-	UnitID  utils.FlexInt   `json:"unit_id"`
-	Price   utils.FlexFloat `json:"price"`
+	utils.OK(w, "Fetch success", dto.NewPOItemResponseList(items))
 }
 
 // POST /api/po/{id}/items
 func (h *POHandler) AddItem(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	var req itemRequest
-	if err := decodeJSON(r, &req); err != nil || req.Product == "" || int(req.Qty) <= 0 || int(req.UnitID) == 0 {
-		utils.Error(w, http.StatusBadRequest, "Data item tidak lengkap")
+	var req dto.POItemRequest
+	if err := decodeJSON(r, &req); err != nil {
+		utils.Error(w, http.StatusBadRequest, "Body permintaan tidak valid")
+		return
+	}
+	if err := req.Validate(); err != nil {
+		utils.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -476,9 +421,13 @@ func (h *POHandler) UpdateItem(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var req itemRequest
-	if err := decodeJSON(r, &req); err != nil || req.Product == "" || int(req.Qty) <= 0 || int(req.UnitID) == 0 {
-		utils.Error(w, http.StatusBadRequest, "Data item tidak lengkap")
+	var req dto.POItemRequest
+	if err := decodeJSON(r, &req); err != nil {
+		utils.Error(w, http.StatusBadRequest, "Body permintaan tidak valid")
+		return
+	}
+	if err := req.Validate(); err != nil {
+		utils.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
