@@ -1,0 +1,2419 @@
+openapi: 3.0.3
+info:
+  title: RMS Backend API
+  description: >
+    REST API untuk RMS (Ruas Management System) - manajemen purchase order,
+    klien, dan tim lapangan. Hasil port dari monolith PHP ke Go + MySQL +
+    Redis. Semua endpoint di bawah `/api/*` (kecuali `/api/auth/*` publik)
+    butuh header `Authorization: Bearer <access_token>`. Endpoint mutating
+    tertentu juga dibatasi RBAC lewat `access_slug` (lihat deskripsi
+    masing-masing operasi).
+  version: "1.0.0"
+  contact:
+    name: RMS Backend
+servers:
+  - url: http://localhost:8080
+    description: Local development
+  - url: https://api.rms.example.com
+    description: Production (ganti sesuai domain Anda)
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Auth
+    description: Login, refresh token, aktivasi, reset password
+  - name: Region
+  - name: Division
+  - name: Unit
+  - name: PPN
+  - name: Role
+    description: RBAC - definisi role (dibatasi akses)
+  - name: Access
+    description: RBAC - definisi permission (dibatasi akses)
+  - name: Admin
+    description: Pengguna internal (staff RMS)
+  - name: Client
+  - name: Purchase Order
+  - name: PO Items
+  - name: Activity
+  - name: Document
+  - name: Dashboard
+  - name: Report
+  - name: Health
+
+paths:
+  # =========================================================
+  # HEALTH
+  # =========================================================
+  /healthz:
+    get:
+      tags: [Health]
+      summary: Liveness probe
+      description: >
+        Mengecek proses masih hidup & bisa serve HTTP. TIDAK menyentuh
+        dependency eksternal (DB/Redis). Tidak butuh autentikasi.
+      security: []
+      responses:
+        "200":
+          description: Server hidup
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseBase"
+
+  /readyz:
+    get:
+      tags: [Health]
+      summary: Readiness probe
+      description: >
+        Ping DB & Redis secara langsung (timeout 2 detik). Balas 503 kalau
+        salah satu dependency down. Tidak butuh autentikasi.
+      security: []
+      responses:
+        "200":
+          description: Semua dependency sehat
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadyzResponse"
+        "503":
+          description: Salah satu dependency (DB/Redis) tidak sehat
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadyzResponse"
+
+  # =========================================================
+  # AUTH
+  # =========================================================
+  /api/auth/login:
+    post:
+      tags: [Auth]
+      summary: Login admin
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Login berhasil
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/LoginResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          description: Email atau password salah / akun nonaktif
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiResponseBase" }
+        "429":
+          description: Terlalu banyak percobaan login (throttled)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiResponseBase" }
+
+  /api/auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Rotasi refresh token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshRequest"
+      responses:
+        "200":
+          description: Token baru diterbitkan
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/TokenPairResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          description: Refresh token tidak valid / sudah dipakai / expired
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiResponseBase" }
+
+  /api/auth/activate:
+    post:
+      tags: [Auth]
+      summary: Aktivasi akun admin baru dari email undangan
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ActivateRequest"
+      responses:
+        "200":
+          description: Akun berhasil diaktifkan
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiResponseBase" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/auth/forgot-password:
+    post:
+      tags: [Auth]
+      summary: Minta link reset password
+      description: >
+        Selalu membalas sukses (terlepas email terdaftar atau tidak) untuk
+        mencegah enumerasi email.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ForgotPasswordRequest"
+      responses:
+        "200":
+          description: Instruksi selalu dikirim jika email terdaftar
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiResponseBase" }
+
+  /api/auth/reset-password-code:
+    post:
+      tags: [Auth]
+      summary: Reset password memakai kode dari email
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResetWithCodeRequest"
+      responses:
+        "200":
+          description: Password berhasil direset
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiResponseBase" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/auth/me:
+    get:
+      tags: [Auth]
+      summary: Identitas admin yang sedang login
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/MeResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/auth/logout:
+    post:
+      tags: [Auth]
+      summary: Logout (revoke sesi)
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshRequest"
+      responses:
+        "200":
+          description: Logout berhasil
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiResponseBase" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/auth/reset-password:
+    post:
+      tags: [Auth]
+      summary: Ganti password sendiri (revoke semua sesi lain)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResetPasswordRequest"
+      responses:
+        "200":
+          description: Password berhasil diganti
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiResponseBase" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          description: Password lama salah
+        "403":
+          description: Akun tidak aktif
+        "429":
+          description: Terlalu banyak percobaan gagal (throttled)
+
+  # =========================================================
+  # REGION
+  # =========================================================
+  /api/regions:
+    get:
+      tags: [Region]
+      summary: List region (dengan paginasi)
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PerPage"
+      responses:
+        "200":
+          $ref: "#/components/responses/RegionListPaged"
+    post:
+      tags: [Region]
+      summary: Buat region baru
+      description: "Butuh access_slug: `create_region`"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TitleRequest" }
+      responses:
+        "201":
+          $ref: "#/components/responses/Created"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/regions/select:
+    get:
+      tags: [Region]
+      summary: List region tanpa paginasi (untuk dropdown)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/RegionResponse" }
+
+  /api/regions/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPathInt"
+    get:
+      tags: [Region]
+      summary: Detail region
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/RegionResponse" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [Region]
+      summary: Ubah region
+      description: "Butuh access_slug: `edit_region`"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TitleRequest" }
+      responses:
+        "200":
+          $ref: "#/components/responses/OK"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    delete:
+      tags: [Region]
+      summary: Hapus region
+      description: "Butuh access_slug: `delete_region`"
+      responses:
+        "200":
+          $ref: "#/components/responses/OK"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          description: Gagal hapus (kemungkinan masih dipakai data lain)
+
+  # =========================================================
+  # DIVISION
+  # =========================================================
+  /api/divisions:
+    get:
+      tags: [Division]
+      summary: List divisi (dengan paginasi)
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PerPage"
+      responses:
+        "200":
+          $ref: "#/components/responses/DivisionListPaged"
+    post:
+      tags: [Division]
+      summary: Buat divisi baru
+      description: "Butuh access_slug: `create_division`"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TitleRequest" }
+      responses:
+        "201":
+          $ref: "#/components/responses/Created"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/divisions/select:
+    get:
+      tags: [Division]
+      summary: List divisi tanpa paginasi (untuk dropdown)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/DivisionResponse" }
+
+  /api/divisions/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPathInt"
+    get:
+      tags: [Division]
+      summary: Detail divisi
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/DivisionResponse" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [Division]
+      summary: Ubah divisi
+      description: "Butuh access_slug: `edit_division`"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TitleRequest" }
+      responses:
+        "200":
+          $ref: "#/components/responses/OK"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    delete:
+      tags: [Division]
+      summary: Hapus divisi
+      description: "Butuh access_slug: `delete_division`"
+      responses:
+        "200":
+          $ref: "#/components/responses/OK"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  # =========================================================
+  # UNIT
+  # =========================================================
+  /api/units:
+    get:
+      tags: [Unit]
+      summary: List satuan (dengan paginasi)
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PerPage"
+      responses:
+        "200":
+          $ref: "#/components/responses/UnitListPaged"
+    post:
+      tags: [Unit]
+      summary: Buat satuan baru
+      description: "Butuh access_slug: `create_unit`"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TitleRequest" }
+      responses:
+        "201":
+          $ref: "#/components/responses/Created"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/units/select:
+    get:
+      tags: [Unit]
+      summary: List satuan tanpa paginasi (untuk dropdown)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/UnitResponse" }
+
+  /api/units/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPathInt"
+    get:
+      tags: [Unit]
+      summary: Detail satuan
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/UnitResponse" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [Unit]
+      summary: Ubah satuan
+      description: "Butuh access_slug: `edit_unit`"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TitleRequest" }
+      responses:
+        "200":
+          $ref: "#/components/responses/OK"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    delete:
+      tags: [Unit]
+      summary: Hapus satuan
+      description: "Butuh access_slug: `delete_unit`"
+      responses:
+        "200":
+          $ref: "#/components/responses/OK"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  # =========================================================
+  # PPN
+  # =========================================================
+  /api/ppn:
+    get:
+      tags: [PPN]
+      summary: List seluruh tarif PPN (histori)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/PpnResponse" }
+    post:
+      tags: [PPN]
+      summary: Buat tarif PPN baru
+      description: "Butuh access_slug: `edit_ppn`"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PpnRequest" }
+      responses:
+        "201":
+          $ref: "#/components/responses/Created"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/ppn/current:
+    get:
+      tags: [PPN]
+      summary: Tarif PPN yang sedang berlaku
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/PpnResponse" }
+        "404":
+          description: Tarif PPN belum diatur
+
+  /api/ppn/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPathInt"
+    get:
+      tags: [PPN]
+      summary: Detail tarif PPN (untuk form edit)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/PpnResponse" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [PPN]
+      summary: Ubah tarif PPN
+      description: "Butuh access_slug: `edit_ppn`"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PpnRequest" }
+      responses:
+        "200":
+          $ref: "#/components/responses/OK"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  # =========================================================
+  # ROLE
+  # =========================================================
+  /api/roles:
+    get:
+      tags: [Role]
+      summary: List role (dengan paginasi, termasuk total_access)
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PerPage"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - $ref: "#/components/schemas/PaginationMeta"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/RoleResponse" }
+    post:
+      tags: [Role]
+      summary: Buat role baru
+      description: "Butuh access_slug: `create_role`"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RoleRequest" }
+      responses:
+        "201":
+          $ref: "#/components/responses/Created"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/roles/select:
+    get:
+      tags: [Role]
+      summary: List role tanpa paginasi (untuk dropdown)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/RoleResponse" }
+
+  /api/roles/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPathInt"
+    get:
+      tags: [Role]
+      summary: Detail role beserta daftar access_id yang dimiliki
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/RoleDetailResponse" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [Role]
+      summary: Ubah role & daftar akses yang dimiliki
+      description: "Butuh access_slug: `edit_role`"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RoleRequest" }
+      responses:
+        "200":
+          $ref: "#/components/responses/OK"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    delete:
+      tags: [Role]
+      summary: Hapus role
+      description: "Butuh access_slug: `delete_role`"
+      responses:
+        "200":
+          $ref: "#/components/responses/OK"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  # =========================================================
+  # ACCESS
+  # =========================================================
+  /api/access:
+    get:
+      tags: [Access]
+      summary: List access/permission (dengan paginasi)
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PerPage"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - $ref: "#/components/schemas/PaginationMeta"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/AccessResponse" }
+    post:
+      tags: [Access]
+      summary: Buat access/permission baru
+      description: "Butuh access_slug: `create_access`"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AccessRequest" }
+      responses:
+        "201":
+          $ref: "#/components/responses/Created"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/access/module/{module}:
+    get:
+      tags: [Access]
+      summary: List access berdasarkan modul (untuk form checklist per-modul)
+      parameters:
+        - name: module
+          in: path
+          required: true
+          schema: { type: string }
+          example: po
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/AccessResponse" }
+
+  /api/access/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPathInt"
+    get:
+      tags: [Access]
+      summary: Detail access
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/AccessResponse" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [Access]
+      summary: Ubah access
+      description: "Butuh access_slug: `edit_access`"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AccessRequest" }
+      responses:
+        "200":
+          $ref: "#/components/responses/OK"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    delete:
+      tags: [Access]
+      summary: Hapus access
+      description: "Butuh access_slug: `delete_access`"
+      responses:
+        "200":
+          $ref: "#/components/responses/OK"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  # =========================================================
+  # ADMIN
+  # =========================================================
+  /api/admins:
+    get:
+      tags: [Admin]
+      summary: List admin (dengan paginasi)
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PerPage"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - $ref: "#/components/schemas/PaginationMeta"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/AdminResponse" }
+    post:
+      tags: [Admin]
+      summary: Buat admin baru (kirim email aktivasi)
+      description: "Butuh access_slug: `create_new_admin`"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateAdminRequest" }
+      responses:
+        "201":
+          $ref: "#/components/responses/Created"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Email sudah terdaftar
+
+  /api/admins/pic:
+    get:
+      tags: [Admin]
+      summary: List kandidat PIC internal (untuk dropdown pembuatan PO)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/AdminResponse" }
+
+  /api/admins/pic-client:
+    get:
+      tags: [Admin]
+      summary: List admin dengan flag PIC client
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/AdminResponse" }
+
+  /api/admins/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPathString"
+    get:
+      tags: [Admin]
+      summary: Detail admin
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/AdminResponse" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [Admin]
+      summary: Ubah data admin
+      description: "Butuh access_slug: `edit_other_admin`"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateAdminRequest" }
+      responses:
+        "200":
+          $ref: "#/components/responses/OK"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Email sudah terdaftar
+    delete:
+      tags: [Admin]
+      summary: Hapus admin
+      description: >
+        Butuh access_slug: `delete_admin`. Tidak bisa menghapus akun sendiri.
+      responses:
+        "200":
+          $ref: "#/components/responses/OK"
+        "400":
+          description: Tidak dapat menghapus akun sendiri
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/admins/{id}/image:
+    parameters:
+      - $ref: "#/components/parameters/IdPathString"
+    post:
+      tags: [Admin]
+      summary: Upload foto profil admin
+      description: "Butuh access_slug: `edit_pic`. Multipart/form-data, field `image` (jpg/jpeg/png/gif, maks 10MB)."
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                image:
+                  type: string
+                  format: binary
+      responses:
+        "200":
+          description: Foto berhasil diperbarui
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          image: { type: string }
+                          image_thumb: { type: string }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/admins/{id}/resend-activation:
+    parameters:
+      - $ref: "#/components/parameters/IdPathString"
+    post:
+      tags: [Admin]
+      summary: Kirim ulang email aktivasi
+      description: "Butuh access_slug: `resend_admin_activation`"
+      responses:
+        "200":
+          $ref: "#/components/responses/OK"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/admins/{id}/deactivate:
+    parameters:
+      - $ref: "#/components/parameters/IdPathString"
+    post:
+      tags: [Admin]
+      summary: Nonaktifkan admin
+      description: "Butuh access_slug: `deactivate_other_admin`"
+      responses:
+        "200":
+          $ref: "#/components/responses/OK"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/admins/{id}/activate:
+    parameters:
+      - $ref: "#/components/parameters/IdPathString"
+    post:
+      tags: [Admin]
+      summary: Aktifkan kembali admin
+      description: "Butuh access_slug: `deactivate_other_admin`"
+      responses:
+        "200":
+          $ref: "#/components/responses/OK"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  # =========================================================
+  # CLIENT
+  # =========================================================
+  /api/clients:
+    get:
+      tags: [Client]
+      summary: List klien (dengan filter & paginasi)
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PerPage"
+        - name: region
+          in: query
+          schema: { type: integer }
+        - name: keyword
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - $ref: "#/components/schemas/PaginationMeta"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/ClientResponse" }
+    post:
+      tags: [Client]
+      summary: Buat klien baru
+      description: "Butuh access_slug: `create_client`"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ClientRequest" }
+      responses:
+        "201":
+          $ref: "#/components/responses/Created"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Email sudah terdaftar
+
+  /api/clients/select:
+    get:
+      tags: [Client]
+      summary: Cari klien ringkas (untuk dropdown saat buat PO)
+      parameters:
+        - name: keyword
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/ClientSelectResponse" }
+
+  /api/clients/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPathInt"
+    get:
+      tags: [Client]
+      summary: Detail klien
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/ClientResponse" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [Client]
+      summary: Ubah data klien
+      description: "Butuh access_slug: `edit_client`"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ClientRequest" }
+      responses:
+        "200":
+          $ref: "#/components/responses/OK"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Email sudah terdaftar
+    delete:
+      tags: [Client]
+      summary: Hapus klien
+      description: "Butuh access_slug: `delete_client`"
+      responses:
+        "200":
+          $ref: "#/components/responses/OK"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/clients/{id}/activate:
+    parameters:
+      - $ref: "#/components/parameters/IdPathInt"
+    post:
+      tags: [Client]
+      summary: Aktifkan klien
+      description: "Butuh access_slug: `change_stat_active`"
+      responses:
+        "200":
+          $ref: "#/components/responses/OK"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/clients/{id}/deactivate:
+    parameters:
+      - $ref: "#/components/parameters/IdPathInt"
+    post:
+      tags: [Client]
+      summary: Nonaktifkan klien
+      description: "Butuh access_slug: `change_stat_active`"
+      responses:
+        "200":
+          $ref: "#/components/responses/OK"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  # =========================================================
+  # PURCHASE ORDER
+  # =========================================================
+  /api/po:
+    get:
+      tags: [Purchase Order]
+      summary: List PO (filter status/keyword/region/tanggal/sort)
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PerPage"
+        - name: status
+          in: query
+          description: 'Default "open"'
+          schema:
+            type: string
+            enum: [open, progress, prepared, complete, cancel]
+        - name: keyword
+          in: query
+          schema: { type: string }
+        - name: region
+          in: query
+          schema: { type: integer }
+        - name: start_date
+          in: query
+          schema: { type: string, format: date }
+        - name: end_date
+          in: query
+          schema: { type: string, format: date }
+        - name: sortby
+          in: query
+          schema: { type: string, enum: [old, new] }
+        - name: acsg_pic
+          in: query
+          description: "Set = 1 untuk membatasi hasil ke PO milik admin yang login (sebagai PIC)"
+          schema: { type: string, enum: ["1"] }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - $ref: "#/components/schemas/PaginationMeta"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/POListItemResponse" }
+    post:
+      tags: [Purchase Order]
+      summary: Buat PO baru (beserta item)
+      description: "Butuh access_slug: `create_po`"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreatePORequest" }
+      responses:
+        "201":
+          description: PO berhasil dibuat
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          po_id: { type: string, example: "PO250716123045-A1B2" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Nomor PO sudah terdaftar
+
+  /api/po/export:
+    get:
+      tags: [Purchase Order]
+      summary: Export breakdown per-item PO ke Excel (.xlsx)
+      description: >
+        Butuh access_slug: `export_po`. Response berupa file binary
+        (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet),
+        di-cache di disk selama 20 menit berdasarkan kombinasi filter.
+        Header `X-Export-Cache: HIT|MISS` menandai apakah dari cache.
+      parameters:
+        - name: start_date
+          in: query
+          schema: { type: string, format: date }
+        - name: end_date
+          in: query
+          schema: { type: string, format: date }
+        - name: division
+          in: query
+          schema: { type: integer }
+        - name: status
+          in: query
+          schema: { type: string }
+        - name: region
+          in: query
+          schema: { type: integer }
+        - name: client
+          in: query
+          schema: { type: integer }
+      responses:
+        "200":
+          description: File .xlsx
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          description: Gagal membuat file export
+
+  /api/po/total:
+    get:
+      tags: [Purchase Order]
+      summary: Ringkasan jumlah PO per status (untuk badge)
+      parameters:
+        - name: region
+          in: query
+          schema: { type: integer }
+        - name: acsg_pic
+          in: query
+          schema: { type: string, enum: ["1"] }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/StatusCounts" }
+
+  /api/po/{id}:
+    parameters:
+      - $ref: "#/components/parameters/PoIdPath"
+    get:
+      tags: [Purchase Order]
+      summary: Detail PO beserta item
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/POWithItemsResponse" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [Purchase Order]
+      summary: Ubah header PO (tanpa item)
+      description: "Butuh access_slug: `edit_po`"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdatePORequest" }
+      responses:
+        "200":
+          $ref: "#/components/responses/OK"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Nomor PO sudah terdaftar
+    delete:
+      tags: [Purchase Order]
+      summary: Hapus PO (cascade ke item, dokumen, aktivitas)
+      description: "Butuh access_slug: `delete_po`"
+      responses:
+        "200":
+          $ref: "#/components/responses/OK"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/po/{id}/status:
+    parameters:
+      - $ref: "#/components/parameters/PoIdPath"
+    post:
+      tags: [Purchase Order]
+      summary: Ubah status PO
+      description: "Butuh access_slug: `change_stat_po`"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ChangeStatusRequest" }
+      responses:
+        "200":
+          $ref: "#/components/responses/OK"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/po/{id}/paid:
+    parameters:
+      - $ref: "#/components/parameters/PoIdPath"
+    post:
+      tags: [Purchase Order]
+      summary: Ubah status pembayaran PO
+      description: "Butuh access_slug: `change_stat_paid`"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ChangePaidRequest" }
+      responses:
+        "200":
+          $ref: "#/components/responses/OK"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/po/{id}/invoice:
+    parameters:
+      - $ref: "#/components/parameters/PoIdPath"
+    post:
+      tags: [Purchase Order]
+      summary: Set/ubah nomor invoice PO
+      description: "Butuh access_slug: `update_invoice`"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateInvoiceRequest" }
+      responses:
+        "200":
+          $ref: "#/components/responses/OK"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/po/{id}/notes:
+    parameters:
+      - $ref: "#/components/parameters/PoIdPath"
+    post:
+      tags: [Purchase Order]
+      summary: Ubah catatan header PO
+      description: "Butuh access_slug: `update_po_notes`"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateNotesRequest" }
+      responses:
+        "200":
+          $ref: "#/components/responses/OK"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/po/{id}/items:
+    parameters:
+      - $ref: "#/components/parameters/PoIdPath"
+    get:
+      tags: [PO Items]
+      summary: List item PO
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/POItemResponse" }
+    post:
+      tags: [PO Items]
+      summary: Tambah item PO (otomatis recompute total)
+      description: "Butuh access_slug: `edit_po`"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/POItemRequest" }
+      responses:
+        "201":
+          $ref: "#/components/responses/Created"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/po/items/{itemId}:
+    parameters:
+      - name: itemId
+        in: path
+        required: true
+        schema: { type: integer }
+    put:
+      tags: [PO Items]
+      summary: Ubah item PO (otomatis recompute total)
+      description: "Butuh access_slug: `edit_po`"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/POItemRequest" }
+      responses:
+        "200":
+          $ref: "#/components/responses/OK"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [PO Items]
+      summary: Hapus item PO (otomatis recompute total)
+      description: "Butuh access_slug: `edit_po`"
+      responses:
+        "200":
+          $ref: "#/components/responses/OK"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # =========================================================
+  # ACTIVITY
+  # =========================================================
+  /api/po/{id}/activities:
+    parameters:
+      - $ref: "#/components/parameters/PoIdPath"
+    get:
+      tags: [Activity]
+      summary: Histori aktivitas sebuah PO
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/ActivityResponse" }
+
+  /api/po/{id}/notes-activity:
+    parameters:
+      - $ref: "#/components/parameters/PoIdPath"
+    post:
+      tags: [Activity]
+      summary: Tambah catatan bebas sebagai entri aktivitas
+      description: "Butuh access_slug: `create_notes`"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [note]
+              properties:
+                note: { type: string }
+      responses:
+        "201":
+          $ref: "#/components/responses/Created"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/activities/dashboard:
+    get:
+      tags: [Activity]
+      summary: Feed aktivitas status-changing terbaru lintas PO
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PerPage"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - $ref: "#/components/schemas/PaginationMeta"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/ActivityResponse" }
+
+  # =========================================================
+  # DOCUMENT
+  # =========================================================
+  /api/po/{id}/documents:
+    parameters:
+      - $ref: "#/components/parameters/PoIdPath"
+    get:
+      tags: [Document]
+      summary: List dokumen PO
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/DocumentResponse" }
+    post:
+      tags: [Document]
+      summary: Upload dokumen PO
+      description: >
+        Butuh access_slug: `upload_document`. Multipart/form-data.
+        Format: pdf, doc, docx, jpg, jpeg, png, gif (maks 10MB). Isi file
+        divalidasi via magic number, bukan cuma ekstensi nama file.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                title:
+                  type: string
+                  description: Opsional, default nama file asli
+      responses:
+        "201":
+          description: Dokumen berhasil diunggah
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          document_id: { type: integer }
+                          file: { type: string }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/po/{id}/documents/{docId}:
+    parameters:
+      - $ref: "#/components/parameters/PoIdPath"
+      - name: docId
+        in: path
+        required: true
+        schema: { type: integer }
+    delete:
+      tags: [Document]
+      summary: Hapus dokumen PO
+      description: "Butuh access_slug: `upload_document`"
+      responses:
+        "200":
+          $ref: "#/components/responses/OK"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # =========================================================
+  # DASHBOARD
+  # =========================================================
+  /api/dashboard:
+    get:
+      tags: [Dashboard]
+      summary: Ringkasan dashboard (jumlah per status + PO terbuka terbaru)
+      parameters:
+        - name: region
+          in: query
+          schema: { type: integer }
+        - name: acsg_pic
+          in: query
+          schema: { type: string, enum: ["1"] }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/DashboardSummaryResponse" }
+
+  # =========================================================
+  # REPORT
+  # =========================================================
+  /api/reports/chart:
+    get:
+      tags: [Report]
+      summary: Data chart jumlah PO per tanggal
+      description: "Butuh access_slug: `view_report_table`"
+      parameters:
+        - name: start_date
+          in: query
+          schema: { type: string, format: date }
+        - name: end_date
+          in: query
+          schema: { type: string, format: date }
+        - name: region
+          in: query
+          schema: { type: integer }
+        - name: status
+          in: query
+          schema: { type: string }
+        - name: acsg_pic
+          in: query
+          schema: { type: string, enum: ["1"] }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            date: { type: string, format: date }
+                            total: { type: integer }
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/reports/bars:
+    get:
+      tags: [Report]
+      summary: Data grafik total nilai PO per region
+      description: "Butuh access_slug: `view_report_table`"
+      parameters:
+        - name: start_date
+          in: query
+          schema: { type: string, format: date }
+        - name: end_date
+          in: query
+          schema: { type: string, format: date }
+        - name: status
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            region_id: { type: integer }
+                            region_title: { type: string }
+                            total_amount: { type: number, format: double }
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/reports/stats:
+    get:
+      tags: [Report]
+      summary: Statistik PO per region (breakdown per status)
+      description: "Butuh access_slug: `view_report_table`"
+      parameters:
+        - name: acsg_pic
+          in: query
+          schema: { type: string, enum: ["1"] }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            region_id: { type: integer }
+                            region_title: { type: string }
+                            total_po: { type: integer }
+                            total_open: { type: integer }
+                            total_prepared: { type: integer }
+                            total_progress: { type: integer }
+                            total_complete: { type: integer }
+                            total_cancel: { type: integer }
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+# =========================================================
+# COMPONENTS
+# =========================================================
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    Page:
+      name: page
+      in: query
+      schema: { type: integer, default: 1, minimum: 1 }
+    PerPage:
+      name: item
+      in: query
+      description: Jumlah item per halaman (maks 200)
+      schema: { type: integer, default: 10, maximum: 200 }
+    IdPathInt:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer }
+    IdPathString:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+    PoIdPath:
+      name: id
+      in: path
+      required: true
+      description: PO ID (format sequential, mis. PO250716123045-A1B2)
+      schema: { type: string }
+
+  responses:
+    OK:
+      description: Berhasil
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ApiResponseBase" }
+    Created:
+      description: Berhasil dibuat
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ApiResponseBase" }
+    BadRequest:
+      description: Permintaan tidak valid (validasi gagal)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ApiResponseBase" }
+    Unauthorized:
+      description: Tidak terautentikasi (token hilang/invalid/expired)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ApiResponseBase" }
+    Forbidden:
+      description: Tidak memiliki hak akses (access_slug tidak dimiliki role)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ApiResponseBase" }
+    NotFound:
+      description: Data tidak ditemukan
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ApiResponseBase" }
+    RegionListPaged:
+      description: OK
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/ApiResponseBase"
+              - $ref: "#/components/schemas/PaginationMeta"
+              - type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/RegionResponse" }
+    DivisionListPaged:
+      description: OK
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/ApiResponseBase"
+              - $ref: "#/components/schemas/PaginationMeta"
+              - type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/DivisionResponse" }
+    UnitListPaged:
+      description: OK
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/ApiResponseBase"
+              - $ref: "#/components/schemas/PaginationMeta"
+              - type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/UnitResponse" }
+
+  schemas:
+    # --- generic wrappers ---
+    ApiResponseBase:
+      type: object
+      properties:
+        success: { type: boolean }
+        message: { type: string }
+        data: {}
+      example:
+        success: true
+        message: "Fetch success"
+        data: {}
+
+    PaginationMeta:
+      type: object
+      properties:
+        meta:
+          type: object
+          properties:
+            total_data: { type: integer }
+            total_page: { type: integer }
+            page: { type: integer }
+
+    ReadyzResponse:
+      type: object
+      properties:
+        success: { type: boolean }
+        message: { type: string }
+        data:
+          type: object
+          properties:
+            database: { type: string, example: "ok" }
+            redis: { type: string, example: "ok" }
+
+    # --- auth ---
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, format: password }
+
+    RefreshRequest:
+      type: object
+      required: [refresh_token]
+      properties:
+        refresh_token: { type: string }
+
+    TokenPairResponse:
+      type: object
+      properties:
+        access_token: { type: string }
+        refresh_token: { type: string }
+        token_type: { type: string, example: "Bearer" }
+        expires_in: { type: integer, description: "detik" }
+
+    LoginResponse:
+      allOf:
+        - $ref: "#/components/schemas/TokenPairResponse"
+        - type: object
+          properties:
+            admin: { $ref: "#/components/schemas/AdminResponse" }
+
+    ResetPasswordRequest:
+      type: object
+      required: [old_password, new_password, confirm_password]
+      properties:
+        old_password: { type: string, format: password }
+        new_password: { type: string, format: password }
+        confirm_password: { type: string, format: password }
+
+    ForgotPasswordRequest:
+      type: object
+      required: [email]
+      properties:
+        email: { type: string, format: email }
+
+    ResetWithCodeRequest:
+      type: object
+      required: [reset_code, new_password]
+      properties:
+        reset_code: { type: string }
+        new_password: { type: string, format: password }
+
+    ActivateRequest:
+      type: object
+      required: [email, token, password]
+      properties:
+        email: { type: string, format: email }
+        token: { type: string }
+        password: { type: string, format: password }
+
+    MeResponse:
+      type: object
+      properties:
+        admin_id: { type: string }
+        email: { type: string }
+        role_id: { type: integer, nullable: true }
+
+    # --- lookup: region/division/unit ---
+    TitleRequest:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string }
+
+    RegionResponse:
+      type: object
+      properties:
+        region_id: { type: integer }
+        region_title: { type: string }
+        region_create_date: { type: string, format: date-time }
+
+    DivisionResponse:
+      type: object
+      properties:
+        division_id: { type: integer }
+        division_title: { type: string }
+        created_at: { type: string, format: date-time }
+
+    UnitResponse:
+      type: object
+      properties:
+        unit_id: { type: integer }
+        unit_title: { type: string }
+        unit_create_date: { type: string, format: date-time }
+
+    # --- ppn ---
+    PpnRequest:
+      type: object
+      required: [value]
+      properties:
+        value:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 100
+          description: Persentase, mis. 11 = 11%
+
+    PpnResponse:
+      type: object
+      properties:
+        ppn_id: { type: integer }
+        ppn_value: { type: number, format: double }
+        ppn_create_date: { type: string, format: date-time }
+
+    # --- role & access (RBAC) ---
+    RoleRequest:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string }
+        access_ids:
+          type: array
+          items: { type: integer }
+
+    RoleResponse:
+      type: object
+      properties:
+        role_id: { type: integer }
+        role_title: { type: string }
+        role_slug: { type: string }
+        role_create_date: { type: string, format: date-time }
+        total_access: { type: integer }
+
+    RoleDetailResponse:
+      type: object
+      properties:
+        role: { $ref: "#/components/schemas/RoleResponse" }
+        access_ids:
+          type: array
+          items: { type: integer }
+
+    AccessRequest:
+      type: object
+      required: [title, module, slug]
+      properties:
+        title: { type: string }
+        module: { type: string, example: "po" }
+        slug: { type: string, example: "edit_po" }
+
+    AccessResponse:
+      type: object
+      properties:
+        access_id: { type: integer }
+        access_title: { type: string }
+        access_slug: { type: string }
+        access_module: { type: string }
+        access_sort: { type: integer }
+        access_create_date: { type: string, format: date-time }
+
+    # --- admin ---
+    CreateAdminRequest:
+      type: object
+      required: [email, username, region_id]
+      properties:
+        email: { type: string, format: email }
+        username: { type: string }
+        role_id: { type: integer, nullable: true }
+        region_id: { type: integer }
+        pic: { type: string, enum: [yes, "no"], default: "no" }
+        pic_client: { type: string, enum: [yes, "no"], default: "no" }
+
+    UpdateAdminRequest:
+      type: object
+      required: [email, username]
+      properties:
+        email: { type: string, format: email }
+        username: { type: string }
+        role_id: { type: integer, nullable: true }
+        region_id: { type: integer }
+        pic: { type: string, enum: [yes, "no"] }
+        pic_client: { type: string, enum: [yes, "no"] }
+
+    AdminResponse:
+      type: object
+      description: >
+        Tidak pernah menyertakan admin_password, admin_token, atau
+        admin_reset_code.
+      properties:
+        admin_id: { type: string }
+        admin_email: { type: string }
+        admin_name: { type: string }
+        admin_active: { type: string, enum: [active, inactive] }
+        admin_pic: { type: string, enum: [yes, "no"] }
+        admin_pic_client: { type: string, enum: [yes, "no"] }
+        admin_ref_role: { type: integer, nullable: true }
+        role_title: { type: string }
+        admin_ref_region: { type: integer }
+        region_title: { type: string }
+        admin_img: { type: string }
+        admin_img_thmb: { type: string }
+        admin_create_date: { type: string, format: date-time }
+
+    # --- client ---
+    ClientRequest:
+      type: object
+      required: [name, email, region_id]
+      properties:
+        name: { type: string }
+        email: { type: string, format: email }
+        phone: { type: string }
+        address: { type: string }
+        region_id: { type: integer }
+
+    ClientResponse:
+      type: object
+      description: >
+        Tidak pernah menyertakan client_password, client_token, atau
+        client_reset_code.
+      properties:
+        client_id: { type: integer }
+        client_name: { type: string }
+        client_phone: { type: string }
+        client_email: { type: string }
+        client_active: { type: string, enum: [yes, "no"] }
+        client_address: { type: string }
+        client_ref_region: { type: integer }
+        region_title: { type: string }
+        client_create_date: { type: string, format: date-time }
+
+    ClientSelectResponse:
+      type: object
+      properties:
+        client_id: { type: integer }
+        client_name: { type: string }
+        client_email: { type: string }
+        client_phone: { type: string }
+
+    # --- purchase order ---
+    CreatePOItemRequest:
+      type: object
+      required: [product, qty, unit_id]
+      properties:
+        desc: { type: string }
+        product: { type: string }
+        qty: { type: integer, minimum: 1 }
+        unit_id: { type: integer }
+        price: { type: number, format: double, minimum: 0 }
+
+    CreatePORequest:
+      type: object
+      required: [order_num, region_id, pic_id, ppn_id, date, items]
+      properties:
+        order_num: { type: string }
+        region_id: { type: integer }
+        pic_id: { type: string }
+        division_id: { type: integer, nullable: true }
+        ppn_id: { type: integer }
+        date: { type: string, format: date }
+        client_id:
+          type: integer
+          description: "0 atau tidak diisi = klien baru (wajib isi client_name & client_email)"
+        client_name: { type: string }
+        client_email: { type: string, format: email }
+        client_phone: { type: string }
+        client_address: { type: string }
+        sub_client: { type: string }
+        items:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/CreatePOItemRequest" }
+
+    UpdatePORequest:
+      type: object
+      required: [order_num]
+      properties:
+        order_num: { type: string }
+        region_id: { type: integer }
+        pic_id: { type: string }
+        division_id: { type: integer, nullable: true }
+        date: { type: string, format: date }
+        client_id: { type: integer }
+        client_name: { type: string }
+        client_email: { type: string, format: email }
+        client_phone: { type: string }
+        client_address: { type: string }
+        sub_client: { type: string }
+
+    POItemRequest:
+      type: object
+      required: [product, qty, unit_id]
+      properties:
+        desc: { type: string }
+        product: { type: string }
+        qty: { type: integer, minimum: 1 }
+        unit_id: { type: integer }
+        price: { type: number, format: double, minimum: 0 }
+
+    ChangeStatusRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [open, progress, prepared, complete, cancel]
+
+    ChangePaidRequest:
+      type: object
+      required: [paid]
+      properties:
+        paid: { type: string, enum: [yes, "no"] }
+
+    UpdateInvoiceRequest:
+      type: object
+      required: [invoice]
+      properties:
+        invoice: { type: string }
+
+    UpdateNotesRequest:
+      type: object
+      properties:
+        notes: { type: string }
+
+    POItemResponse:
+      type: object
+      properties:
+        item_id: { type: integer }
+        item_product: { type: string }
+        item_desc: { type: string }
+        item_qty: { type: integer }
+        item_price: { type: number, format: double }
+        unit_title: { type: string }
+
+    POResponse:
+      type: object
+      properties:
+        po_id: { type: string }
+        po_order_num: { type: string }
+        po_invoice: { type: string }
+        po_status:
+          type: string
+          enum: [open, progress, prepared, complete, cancel]
+        po_document: { type: string, enum: [yes, "no"] }
+        po_paid: { type: string, enum: [yes, "no"] }
+        po_notes: { type: string }
+        po_subclient: { type: string }
+        po_subtotal: { type: number, format: double }
+        po_ppn_rate: { type: number, format: double }
+        po_ppn_amount: { type: number, format: double }
+        po_total: { type: number, format: double }
+        po_item_total: { type: integer }
+        client_name: { type: string }
+        client_email: { type: string }
+        client_phone: { type: string }
+        client_address: { type: string }
+        admin_name: { type: string }
+        pic_name: { type: string }
+        region_title: { type: string }
+        division_title: { type: string }
+        po_date: { type: string, format: date }
+        po_exp_date: { type: string, format: date }
+        po_prepared_date: { type: string, format: date-time }
+        po_progress_date: { type: string, format: date-time }
+        po_complete_date: { type: string, format: date-time }
+        po_cancel_date: { type: string, format: date-time }
+        po_create_date: { type: string, format: date-time }
+        po_modify_date: { type: string, format: date-time }
+
+    POWithItemsResponse:
+      type: object
+      properties:
+        po: { $ref: "#/components/schemas/POResponse" }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/POItemResponse" }
+
+    POListItemResponse:
+      type: object
+      description: Representasi ringkas 1 baris PO untuk endpoint list/dashboard.
+      properties:
+        po_id: { type: string }
+        po_order_num: { type: string }
+        po_invoice: { type: string }
+        po_status: { type: string }
+        po_total: { type: number, format: double }
+        po_document: { type: string }
+        po_paid: { type: string }
+        po_subclient: { type: string }
+        po_date: { type: string, format: date }
+        po_exp_date: { type: string, format: date }
+        client_name: { type: string }
+        pic_name: { type: string }
+        division_title: { type: string }
+        region_title: { type: string }
+
+    StatusCounts:
+      type: object
+      properties:
+        open: { type: integer }
+        progress: { type: integer }
+        prepared: { type: integer }
+        complete: { type: integer }
+        cancel: { type: integer }
+
+    # --- activity ---
+    ActivityResponse:
+      type: object
+      properties:
+        activity_id: { type: integer }
+        activity_ref_po: { type: string }
+        activity_type:
+          type: string
+          example: "progress"
+          description: "open/progress/prepared/complete/cancel/notes/edit/add/delete/upload/dst"
+        activity_notes: { type: string }
+        activity_create_date: { type: string, format: date-time }
+        admin_name: { type: string }
+        admin_img: { type: string }
+
+    # --- document ---
+    DocumentResponse:
+      type: object
+      properties:
+        document_id: { type: integer }
+        document_ref_po: { type: string }
+        document_title: { type: string }
+        document_file: { type: string }
+        document_create_date: { type: string, format: date-time }
+
+    # --- dashboard ---
+    DashboardSummaryResponse:
+      type: object
+      properties:
+        total_open: { type: integer }
+        total_progress: { type: integer }
+        total_prepared: { type: integer }
+        total_complete: { type: integer }
+        total_cancel: { type: integer }
+        recent_open_po:
+          type: array
+          items: { $ref: "#/components/schemas/POListItemResponse" }

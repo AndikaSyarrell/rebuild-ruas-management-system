@@ -87,19 +87,13 @@ func New(d *Dependencies) http.Handler {
 		return middleware.RequireAccess(d.AccessRepo, slug)
 	}
 
+	r.Handle("/docs/*", http.StripPrefix("/docs/", http.FileServer(http.Dir("./docs"))))
+
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		// Liveness probe - cuma menjawab "proses masih hidup & bisa serve
-		// HTTP", TIDAK menyentuh dependency eksternal (DB/Redis). Kalau ini
-		// dijadikan readiness probe, DB/Redis yang lambat/down akan membuat
-		// k8s salah kaprah me-restart pod yang sebetulnya sehat (liveness
-		// dan readiness punya tujuan berbeda, jangan dicampur).
 		utils.OK(w, "OK", nil)
 	})
 
 	r.Get("/readyz", func(w http.ResponseWriter, r *http.Request) {
-		// Readiness probe - benar-benar ping DB & Redis. Kalau salah satu
-		// down/timeout, balas 503 supaya load balancer/k8s berhenti
-		// mengirim traffic ke instance ini sampai dependency-nya pulih.
 		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()
 
