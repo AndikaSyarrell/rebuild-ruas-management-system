@@ -33,6 +33,12 @@ func (h *DashboardHandler) Summary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	paidCounts, err := h.poRepo.CountByPaid(r.Context(), regionID, picID)
+	if err != nil {
+		utils.Error(w, http.StatusInternalServerError, "Gagal mengambil ringkasan pembayaran")
+		return
+	}
+
 	recent, err := h.poRepo.ListDashboardOpen(r.Context(), regionID, picID, 10)
 	if err != nil {
 		utils.Error(w, http.StatusInternalServerError, "Gagal mengambil PO terbaru")
@@ -45,6 +51,8 @@ func (h *DashboardHandler) Summary(w http.ResponseWriter, r *http.Request) {
 		"total_prepared": counts["prepared"],
 		"total_complete": counts["complete"],
 		"total_cancel":   counts["cancel"],
+		"total_paid":     paidCounts["yes"],
+		"total_unpaid":   paidCounts["no"],
 		"recent_open_po": dto.NewPOListItemResponseList(recent),
 	})
 }

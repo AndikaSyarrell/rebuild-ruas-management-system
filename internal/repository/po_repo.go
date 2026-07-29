@@ -285,6 +285,41 @@ func (r *PORepo) CountByStatus(ctx context.Context, regionID int, picID string) 
 	return out, rows.Err()
 }
 
+func (r *PORepo) CountByPaid(ctx context.Context, regionID int, picID string) (map[string]int, error) {
+	var conds []string
+	var args []interface{}
+	if regionID != 0 {
+		conds = append(conds, "po_ref_region = ?")
+		args = append(args, regionID)
+	}
+	if picID != "" {
+		conds = append(conds, "po_ref_pic = ?")
+		args = append(args, picID)
+	}
+	where := ""
+	if len(conds) > 0 {
+		where = "WHERE " + strings.Join(conds, " AND ")
+	}
+
+	query := fmt.Sprintf(`SELECT po_paid, COUNT(*) FROM T_Po %s GROUP BY po_paid`, where)
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := map[string]int{"yes": 0, "no": 0}
+	for rows.Next() {
+		var paid string
+		var count int
+		if err := rows.Scan(&paid, &count); err != nil {
+			return nil, err
+		}
+		out[paid] = count
+	}
+	return out, rows.Err()
+}
+
 func (r *PORepo) ChangeStatus(ctx context.Context, id, status string) error {
 	dateColumn := map[string]string{
 		"progress": "po_progress_date",
