@@ -217,9 +217,15 @@ func (r *PORepo) List(ctx context.Context, f ListFilter) ([]models.PO, int, erro
 
 	listQuery := `
 		SELECT po.po_id, po.po_order_num, po.po_invoice, po.po_status, po.po_total, po.po_document,
-		       po.po_date, po.po_exp_date, po.po_paid, po.po_subclient,
-		       COALESCE(cl.client_name, ''), COALESCE(ad.admin_name, ''), COALESCE(dv.division_title, ''),
-		       COALESCE(rg.region_title, '')
+			po.po_date, po.po_exp_date, po.po_paid, po.po_subclient,
+			COALESCE(cl.client_name, ''), COALESCE(ad.admin_name, ''), COALESCE(dv.division_title, ''),
+			COALESCE(rg.region_title, ''),
+			COALESCE(
+				(SELECT GROUP_CONCAT(it.item_product SEPARATOR '||')
+				FROM T_Po_Item it
+				WHERE it.item_ref_po = po.po_id),
+				''
+			) AS product_names
 		FROM T_Po po
 		LEFT JOIN T_Client cl ON po.po_ref_client = cl.client_id
 		LEFT JOIN T_Admin ad ON po.po_ref_pic = ad.admin_id
@@ -241,7 +247,7 @@ func (r *PORepo) List(ctx context.Context, f ListFilter) ([]models.PO, int, erro
 		var v models.PO
 		if err := rows.Scan(&v.ID, &v.OrderNum, &v.Invoice, &v.Status, &v.Total, &v.Document,
 			&v.Date, &v.ExpDate, &v.Paid, &v.SubClient,
-			&v.ClientName, &v.PicName, &v.DivisionName, &v.RegionTitle); err != nil {
+			&v.ClientName, &v.PicName, &v.DivisionName, &v.RegionTitle, &v.ProductNames); err != nil {
 			return nil, 0, err
 		}
 		out = append(out, v)

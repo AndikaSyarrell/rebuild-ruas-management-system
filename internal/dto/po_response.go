@@ -1,6 +1,7 @@
 package dto
 
 import (
+	"strings"
 	"time"
 
 	"rms-backend/internal/models"
@@ -67,6 +68,7 @@ type POResponse struct {
 	PicName      string `json:"pic_name,omitempty"`
 	RegionTitle  string `json:"region_title,omitempty"`
 	DivisionName string `json:"division_title,omitempty"`
+	ProductNames []string `json:"product_names"`
 
 	Date         string `json:"po_date,omitempty"`
 	ExpDate      string `json:"po_exp_date,omitempty"`
@@ -162,6 +164,21 @@ type POListItemResponse struct {
 	PicName      string  `json:"pic_name,omitempty"`
 	DivisionName string  `json:"division_title,omitempty"`
 	RegionTitle  string  `json:"region_title,omitempty"`
+	ProductNames []string `json:"product_names"`
+}
+
+func splitProductNames(raw string) []string {
+	out := []string{}
+	if raw == "" {
+		return out
+	}
+	for _, p := range strings.Split(raw, "||") {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func NewPOListItemResponse(m models.PO) POListItemResponse {
@@ -188,6 +205,7 @@ func NewPOListItemResponse(m models.PO) POListItemResponse {
 		PicName:      m.PicName,
 		DivisionName: m.DivisionName,
 		RegionTitle:  m.RegionTitle,
+		ProductNames: splitProductNames(m.ProductNames),
 	}
 }
 

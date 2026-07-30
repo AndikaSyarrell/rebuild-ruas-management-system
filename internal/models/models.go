@@ -179,6 +179,7 @@ type PO struct {
 	RegionTitle  string  `json:"region_title,omitempty" db:"region_title"`
 	DivisionName string  `json:"division_title,omitempty" db:"division_title"`
 	PpnValue     float64 `json:"ppn_value,omitempty" db:"ppn_value"`
+	ProductNames string  `json:"-" db:"product_names"`
 }
 
 type POItem struct {

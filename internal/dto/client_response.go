@@ -50,6 +50,7 @@ type ClientSelectResponse struct {
 	Name  string `json:"client_name"`
 	Email string `json:"client_email"`
 	Phone string `json:"client_phone"`
+	Address string `json:"client_address"`
 }
 
 func NewClientSelectResponse(m models.Client) ClientSelectResponse {
@@ -58,6 +59,7 @@ func NewClientSelectResponse(m models.Client) ClientSelectResponse {
 		Name:  m.Name,
 		Email: m.Email,
 		Phone: m.Phone,
+		Address: m.Address,
 	}
 }
 
