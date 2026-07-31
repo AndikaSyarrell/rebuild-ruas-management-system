@@ -784,6 +784,30 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "403":
           $ref: "#/components/responses/Forbidden"
+  
+  /api/access/mine:
+    get:
+      tags: [Access]
+      summary: Daftar access_slug milik admin yang sedang login
+      description: >
+        Dipakai frontend untuk membangun UI secara dinamis (menyembunyikan
+        tombol/menu sesuai hak akses) tanpa perlu mencoba endpoint dan
+        menebak dari respons 403. Cukup butuh login, tidak dibatasi
+        access_slug tertentu.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/PermissionsResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /api/access/module/{module}:
     get:
@@ -1218,6 +1242,9 @@ paths:
         - name: keyword
           in: query
           schema: { type: string }
+            description: >
+             Mencari berdasarkan nomor PO, PO ID, nama klien, sub-client, ATAU
+             nama produk pada salah satu item PO.
         - name: region
           in: query
           schema: { type: integer }
@@ -2135,6 +2162,14 @@ components:
         access_module: { type: string }
         access_sort: { type: integer }
         access_create_date: { type: string, format: date-time }
+    
+    PermissionsResponse:
+      type: object
+      properties:
+        access_slugs:
+          type: array
+          items: { type: string }
+          example: ["create_po", "edit_po", "delete_client"]
 
     # --- admin ---
     CreateAdminRequest:
@@ -2370,6 +2405,10 @@ components:
         pic_name: { type: string }
         division_title: { type: string }
         region_title: { type: string }
+        product_names:           
+         type: array
+         items: { type: string }
+         description: Seluruh nama produk pada PO ini, untuk ditampilkan sebagai konteks di hasil pencarian
 
     StatusCounts:
       type: object
@@ -2414,6 +2453,8 @@ components:
         total_prepared: { type: integer }
         total_complete: { type: integer }
         total_cancel: { type: integer }
+        total_paid: { type: integer }      # baru
+        total_unpaid: { type: integer }    # baru
         recent_open_po:
           type: array
           items: { $ref: "#/components/schemas/POListItemResponse" }

@@ -162,3 +162,26 @@ func (r *AccessRepo) ReplaceRoleAccess(ctx context.Context, roleID int, accessID
 
 	return tx.Commit()
 }
+
+func (r *AccessRepo) ListSlugsForRole(ctx context.Context, roleID int) ([]string, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT ac.access_slug
+		FROM T_Role_Access ra
+		JOIN T_Access ac ON ac.access_id = ra.role_access_ref_access
+		WHERE ra.role_access_ref_role = ?
+		ORDER BY ac.access_slug ASC`, roleID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []string{}
+	for rows.Next() {
+		var slug string
+		if err := rows.Scan(&slug); err != nil {
+			return nil, err
+		}
+		out = append(out, slug)
+	}
+	return out, rows.Err()
+}

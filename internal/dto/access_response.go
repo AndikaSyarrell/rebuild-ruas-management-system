@@ -15,6 +15,10 @@ type AccessResponse struct {
 	CreateDate string `json:"access_create_date"`
 }
 
+type PermissionsResponse struct {
+	AccessSlugs []string `json:"access_slugs"`
+}
+
 func NewAccessResponse(m models.Access) AccessResponse {
 	return AccessResponse{
 		ID: m.ID, Title: m.Title, Slug: m.Slug, Module: m.Module,

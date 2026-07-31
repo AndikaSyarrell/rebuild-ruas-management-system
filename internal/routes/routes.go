@@ -190,6 +190,7 @@ func New(d *Dependencies) http.Handler {
 			rt.With(requireAccess("delete_role")).Delete("/{id}", d.RoleHandler.Delete)
 		})
 		api.Route("/access", func(rt chi.Router) {
+			rt.Get("/mine", d.AccessHandler.Mine)
 			rt.Get("/", d.AccessHandler.List)
 			rt.Get("/module/{module}", d.AccessHandler.ListByModule)
 			rt.Get("/{id}", d.AccessHandler.Detail)

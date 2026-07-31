@@ -8,6 +8,7 @@ import (
 	"rms-backend/internal/dto"
 	"rms-backend/internal/repository"
 	"rms-backend/internal/utils"
+	"rms-backend/internal/middleware"
 )
 
 type AccessHandler struct{ repo *repository.AccessRepo }
@@ -101,4 +102,22 @@ func (h *AccessHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	utils.OK(w, "Akses berhasil dihapus", nil)
+}
+
+func (h *AccessHandler) Mine(w http.ResponseWriter, r *http.Request) {
+	claims, ok := middleware.ClaimsFromContext(r.Context())
+	if !ok {
+		utils.Error(w, http.StatusUnauthorized, "Tidak terautentikasi")
+		return
+	}
+	if claims.RoleID == nil {
+		utils.OK(w, "Fetch success", dto.PermissionsResponse{AccessSlugs: []string{}})
+		return
+	}
+	slugs, err := h.repo.ListSlugsForRole(r.Context(), *claims.RoleID)
+	if err != nil {
+		utils.Error(w, http.StatusInternalServerError, "Gagal mengambil daftar akses")
+		return
+	}
+	utils.OK(w, "Fetch success", dto.PermissionsResponse{AccessSlugs: slugs})
 }
