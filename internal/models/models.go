@@ -141,45 +141,47 @@ type Client struct {
 // ---------------------------------------------------------------------
 
 type PO struct {
-	ID           string     `json:"po_id" db:"po_id"`
-	OrderNum     string     `json:"po_order_num" db:"po_order_num"`
-	Invoice      *string    `json:"po_invoice" db:"po_invoice"`
-	RefClient    int        `json:"po_ref_client" db:"po_ref_client"`
-	RefAdmin     string     `json:"po_ref_admin" db:"po_ref_admin"`
-	RefPic       string     `json:"po_ref_pic" db:"po_ref_pic"`
-	RefDivision  *int       `json:"po_ref_division" db:"po_ref_division"`
-	RefRegion    int        `json:"po_ref_region" db:"po_ref_region"`
-	RefPpn       int        `json:"po_ref_ppn" db:"po_ref_ppn"`
-	ClientName   string     `json:"po_client_name" db:"po_client_name"`
-	ClientEmail  string     `json:"po_client_email" db:"po_client_email"`
-	ClientPhone  string     `json:"po_client_phone" db:"po_client_phone"`
-	ClientAddr   string     `json:"po_client_address" db:"po_client_address"`
-	SubClient    *string    `json:"po_subclient" db:"po_subclient"`
-	Subtotal     float64    `json:"po_subtotal" db:"po_subtotal"`
-	PpnRate      float64    `json:"po_ppn_rate" db:"po_ppn_rate"`
-	PpnAmount    float64    `json:"po_ppn_amount" db:"po_ppn_amount"`
-	Total        float64    `json:"po_total" db:"po_total"`
-	ItemTotal    int        `json:"po_item_total" db:"po_item_total"`
-	Status       string     `json:"po_status" db:"po_status"`
-	Document     string     `json:"po_document" db:"po_document"`
-	Paid         string     `json:"po_paid" db:"po_paid"`
-	Notes        *string    `json:"po_notes" db:"po_notes"`
-	Date         *time.Time `json:"po_date" db:"po_date"`
-	ExpDate      *time.Time `json:"po_exp_date" db:"po_exp_date"`
-	PreparedDate *time.Time `json:"po_prepared_date" db:"po_prepared_date"`
-	ProgressDate *time.Time `json:"po_progress_date" db:"po_progress_date"`
-	CompleteDate *time.Time `json:"po_complete_date" db:"po_complete_date"`
-	CancelDate   *time.Time `json:"po_cancel_date" db:"po_cancel_date"`
-	CreateDate   time.Time  `json:"po_create_date" db:"po_create_date"`
-	ModifyDate   time.Time  `json:"po_modify_date" db:"po_modify_date"`
+	ID            string     `json:"po_id" db:"po_id"`
+	OrderNum      string     `json:"po_order_num" db:"po_order_num"`
+	Invoice       *string    `json:"po_invoice" db:"po_invoice"`
+	RefClient     int        `json:"po_ref_client" db:"po_ref_client"`
+	RefAdmin      string     `json:"po_ref_admin" db:"po_ref_admin"`
+	RefPic        string     `json:"po_ref_pic" db:"po_ref_pic"`
+	RefPicClient  *string    `json:"po_ref_pic_client" db:"po_ref_pic_client"`
+	RefDivision   *int       `json:"po_ref_division" db:"po_ref_division"`
+	RefRegion     int        `json:"po_ref_region" db:"po_ref_region"`
+	RefPpn        int        `json:"po_ref_ppn" db:"po_ref_ppn"`
+	ClientName    string     `json:"po_client_name" db:"po_client_name"`
+	ClientEmail   string     `json:"po_client_email" db:"po_client_email"`
+	ClientPhone   string     `json:"po_client_phone" db:"po_client_phone"`
+	ClientAddr    string     `json:"po_client_address" db:"po_client_address"`
+	SubClient     *string    `json:"po_subclient" db:"po_subclient"`
+	Subtotal      float64    `json:"po_subtotal" db:"po_subtotal"`
+	PpnRate       float64    `json:"po_ppn_rate" db:"po_ppn_rate"`
+	PpnAmount     float64    `json:"po_ppn_amount" db:"po_ppn_amount"`
+	Total         float64    `json:"po_total" db:"po_total"`
+	ItemTotal     int        `json:"po_item_total" db:"po_item_total"`
+	Status        string     `json:"po_status" db:"po_status"`
+	Document      string     `json:"po_document" db:"po_document"`
+	Paid          string     `json:"po_paid" db:"po_paid"`
+	Notes         *string    `json:"po_notes" db:"po_notes"`
+	Date          *time.Time `json:"po_date" db:"po_date"`
+	ExpDate       *time.Time `json:"po_exp_date" db:"po_exp_date"`
+	PreparedDate  *time.Time `json:"po_prepared_date" db:"po_prepared_date"`
+	ProgressDate  *time.Time `json:"po_progress_date" db:"po_progress_date"`
+	CompleteDate  *time.Time `json:"po_complete_date" db:"po_complete_date"`
+	CancelDate    *time.Time `json:"po_cancel_date" db:"po_cancel_date"`
+	CreateDate    time.Time  `json:"po_create_date" db:"po_create_date"`
+	ModifyDate    time.Time  `json:"po_modify_date" db:"po_modify_date"`
 
 	// hasil JOIN opsional
-	AdminName    string  `json:"admin_name,omitempty" db:"admin_name"`
-	PicName      string  `json:"pic_name,omitempty" db:"pic_name"`
-	RegionTitle  string  `json:"region_title,omitempty" db:"region_title"`
-	DivisionName string  `json:"division_title,omitempty" db:"division_title"`
-	PpnValue     float64 `json:"ppn_value,omitempty" db:"ppn_value"`
-	ProductNames string  `json:"-" db:"product_names"`
+	AdminName     string  `json:"admin_name,omitempty" db:"admin_name"`
+	PicName       string  `json:"pic_name,omitempty" db:"pic_name"`
+	PicClientName string  `json:"pic_client_name,omitempty" db:"pic_client_name"`
+	RegionTitle   string  `json:"region_title,omitempty" db:"region_title"`
+	DivisionName  string  `json:"division_title,omitempty" db:"division_title"`
+	PpnValue      float64 `json:"ppn_value,omitempty" db:"ppn_value"`
+	ProductNames  string  `json:"-" db:"product_names"`
 }
 
 type POItem struct {

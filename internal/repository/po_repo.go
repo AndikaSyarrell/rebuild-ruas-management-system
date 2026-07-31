@@ -47,27 +47,25 @@ type NewPOItemInput struct {
 }
 
 type NewPOInput struct {
-	ID          string
-	OrderNum    string
-	RegionID    int
-	AdminID     string // pembuat (po_ref_admin)
-	PicID       string // PIC penanganan (po_ref_pic)
-	DivisionID  *int
-	PpnID       int
-	PpnRate     float64
-	Date        string // Y-m-d
-	ClientID    int
-	ClientName  string
-	ClientEmail string
-	ClientPhone string
-	ClientAddr  string
-	SubClient   string
-	Items       []NewPOItemInput
+	ID           string
+	OrderNum     string
+	RegionID     int
+	AdminID      string
+	PicID        string // PIC project (po_ref_pic)
+	PicClientID  string // PIC client (po_ref_pic_client) - opsional, boleh kosong
+	DivisionID   *int
+	PpnID        int
+	PpnRate      float64
+	Date         string
+	ClientID     int
+	ClientName   string
+	ClientEmail  string
+	ClientPhone  string
+	ClientAddr   string
+	SubClient    string
+	Items        []NewPOItemInput
 }
 
-// Create menyimpan PO + item dalam SATU transaksi database (memperbaiki bug PHP di
-// controller_create.php yang insert item satu-per-satu tanpa transaksi, sehingga PO
-// bisa "setengah jadi" bila salah satu insert item gagal di tengah jalan).
 func (r *PORepo) Create(ctx context.Context, in NewPOInput) error {
 	subtotal := 0.0
 	for _, it := range in.Items {
@@ -82,14 +80,20 @@ func (r *PORepo) Create(ctx context.Context, in NewPOInput) error {
 	}
 	defer tx.Rollback()
 
+	// po_ref_pic_client nullable - NULL kalau tidak diisi (bukan admin_id kosong)
+	var picClientID interface{}
+	if in.PicClientID != "" {
+		picClientID = in.PicClientID
+	}
+
 	_, err = tx.ExecContext(ctx, `
-		INSERT INTO T_Po (po_id, po_order_num, po_ref_client, po_ref_admin, po_ref_pic, po_ref_region,
-		 po_ref_division, po_ref_ppn, po_client_name, po_client_email, po_client_phone, po_client_address,
-		 po_subclient, po_subtotal, po_ppn_rate, po_ppn_amount, po_total, po_item_total, po_status, po_date,
-		 po_create_date)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, NOW())`,
-		in.ID, in.OrderNum, in.ClientID, in.AdminID, in.PicID, in.RegionID, in.DivisionID, in.PpnID,
-		in.ClientName, in.ClientEmail, in.ClientPhone, in.ClientAddr, in.SubClient,
+		INSERT INTO T_Po (po_id, po_order_num, po_ref_client, po_ref_admin, po_ref_pic, po_ref_pic_client,
+		 po_ref_region, po_ref_division, po_ref_ppn, po_client_name, po_client_email, po_client_phone,
+		 po_client_address, po_subclient, po_subtotal, po_ppn_rate, po_ppn_amount, po_total, po_item_total,
+		 po_status, po_date, po_create_date)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, NOW())`,
+		in.ID, in.OrderNum, in.ClientID, in.AdminID, in.PicID, picClientID, in.RegionID, in.DivisionID,
+		in.PpnID, in.ClientName, in.ClientEmail, in.ClientPhone, in.ClientAddr, in.SubClient,
 		subtotal, in.PpnRate, ppnAmount, total, len(in.Items), in.Date)
 	if err != nil {
 		return err
@@ -116,16 +120,17 @@ func (r *PORepo) Create(ctx context.Context, in NewPOInput) error {
 
 const poDetailSelect = `
 	SELECT po.po_id, po.po_order_num, po.po_invoice, po.po_ref_client, po.po_ref_admin, po.po_ref_pic,
-	       po.po_ref_division, po.po_ref_region, po.po_ref_ppn, po.po_client_name, po.po_client_email,
-	       po.po_client_phone, po.po_client_address, po.po_subclient, po.po_subtotal, po.po_ppn_rate,
-	       po.po_ppn_amount, po.po_total, po.po_item_total, po.po_status, po.po_document, po.po_paid,
-	       po.po_notes, po.po_date, po.po_exp_date, po.po_prepared_date, po.po_progress_date,
+	       po.po_ref_pic_client, po.po_ref_division, po.po_ref_region, po.po_ref_ppn, po.po_client_name,
+	       po.po_client_email, po.po_client_phone, po.po_client_address, po.po_subclient, po.po_subtotal,
+	       po.po_ppn_rate, po.po_ppn_amount, po.po_total, po.po_item_total, po.po_status, po.po_document,
+	       po.po_paid, po.po_notes, po.po_date, po.po_exp_date, po.po_prepared_date, po.po_progress_date,
 	       po.po_complete_date, po.po_cancel_date, po.po_create_date, po.po_modify_date,
-	       COALESCE(ad.admin_name, ''), COALESCE(pic.admin_name, ''), COALESCE(rg.region_title, ''),
-	       COALESCE(dv.division_title, ''), COALESCE(pp.ppn_value, 0)
+	       COALESCE(ad.admin_name, ''), COALESCE(pic.admin_name, ''), COALESCE(picc.admin_name, ''),
+	       COALESCE(rg.region_title, ''), COALESCE(dv.division_title, ''), COALESCE(pp.ppn_value, 0)
 	FROM T_Po po
 	LEFT JOIN T_Admin ad ON po.po_ref_admin = ad.admin_id
 	LEFT JOIN T_Admin pic ON po.po_ref_pic = pic.admin_id
+	LEFT JOIN T_Admin picc ON po.po_ref_pic_client = picc.admin_id
 	LEFT JOIN T_Region rg ON po.po_ref_region = rg.region_id
 	LEFT JOIN T_Division dv ON po.po_ref_division = dv.division_id
 	LEFT JOIN T_Ppn pp ON po.po_ref_ppn = pp.ppn_id
@@ -136,12 +141,12 @@ func scanPO(row interface {
 }) (*models.PO, error) {
 	var v models.PO
 	err := row.Scan(&v.ID, &v.OrderNum, &v.Invoice, &v.RefClient, &v.RefAdmin, &v.RefPic,
-		&v.RefDivision, &v.RefRegion, &v.RefPpn, &v.ClientName, &v.ClientEmail,
+		&v.RefPicClient, &v.RefDivision, &v.RefRegion, &v.RefPpn, &v.ClientName, &v.ClientEmail,
 		&v.ClientPhone, &v.ClientAddr, &v.SubClient, &v.Subtotal, &v.PpnRate,
 		&v.PpnAmount, &v.Total, &v.ItemTotal, &v.Status, &v.Document, &v.Paid,
 		&v.Notes, &v.Date, &v.ExpDate, &v.PreparedDate, &v.ProgressDate,
 		&v.CompleteDate, &v.CancelDate, &v.CreateDate, &v.ModifyDate,
-		&v.AdminName, &v.PicName, &v.RegionTitle, &v.DivisionName, &v.PpnValue)
+		&v.AdminName, &v.PicName, &v.PicClientName, &v.RegionTitle, &v.DivisionName, &v.PpnValue)
 	if err != nil {
 		return nil, err
 	}
@@ -218,8 +223,8 @@ func (r *PORepo) List(ctx context.Context, f ListFilter) ([]models.PO, int, erro
 	listQuery := `
 		SELECT po.po_id, po.po_order_num, po.po_invoice, po.po_status, po.po_total, po.po_document,
 			po.po_date, po.po_exp_date, po.po_paid, po.po_subclient,
-			COALESCE(cl.client_name, ''), COALESCE(ad.admin_name, ''), COALESCE(dv.division_title, ''),
-			COALESCE(rg.region_title, ''),
+			COALESCE(cl.client_name, ''), COALESCE(ad.admin_name, ''), COALESCE(adc.admin_name, ''),
+			COALESCE(dv.division_title, ''), COALESCE(rg.region_title, ''),
 			COALESCE(
 				(SELECT GROUP_CONCAT(it.item_product SEPARATOR '||')
 				FROM T_Po_Item it
@@ -229,6 +234,7 @@ func (r *PORepo) List(ctx context.Context, f ListFilter) ([]models.PO, int, erro
 		FROM T_Po po
 		LEFT JOIN T_Client cl ON po.po_ref_client = cl.client_id
 		LEFT JOIN T_Admin ad ON po.po_ref_pic = ad.admin_id
+		LEFT JOIN T_Admin adc ON po.po_ref_pic_client = adc.admin_id
 		LEFT JOIN T_Region rg ON po.po_ref_region = rg.region_id
 		LEFT JOIN T_Division dv ON po.po_ref_division = dv.division_id
 		` + whereClause + `
@@ -247,7 +253,7 @@ func (r *PORepo) List(ctx context.Context, f ListFilter) ([]models.PO, int, erro
 		var v models.PO
 		if err := rows.Scan(&v.ID, &v.OrderNum, &v.Invoice, &v.Status, &v.Total, &v.Document,
 			&v.Date, &v.ExpDate, &v.Paid, &v.SubClient,
-			&v.ClientName, &v.PicName, &v.DivisionName, &v.RegionTitle, &v.ProductNames); err != nil {
+			&v.ClientName, &v.PicName, &v.PicClientName, &v.DivisionName, &v.RegionTitle, &v.ProductNames); err != nil {
 			return nil, 0, err
 		}
 		out = append(out, v)
@@ -369,6 +375,7 @@ type UpdatePOInput struct {
 	OrderNum    string
 	RegionID    int
 	PicID       string
+	PicClientID string // boleh kosong = NULL (hapus PIC client dari PO)
 	DivisionID  *int
 	Date        string
 	ClientID    int
@@ -380,12 +387,17 @@ type UpdatePOInput struct {
 }
 
 func (r *PORepo) UpdateHeader(ctx context.Context, id string, in UpdatePOInput) error {
+	var picClientID interface{}
+	if in.PicClientID != "" {
+		picClientID = in.PicClientID
+	}
+
 	_, err := r.db.ExecContext(ctx, `
-		UPDATE T_Po SET po_order_num = ?, po_ref_region = ?, po_ref_pic = ?, po_ref_division = ?, po_date = ?,
-		 po_ref_client = ?, po_client_name = ?, po_client_email = ?, po_client_phone = ?, po_client_address = ?,
-		 po_subclient = ?
+		UPDATE T_Po SET po_order_num = ?, po_ref_region = ?, po_ref_pic = ?, po_ref_pic_client = ?,
+		 po_ref_division = ?, po_date = ?, po_ref_client = ?, po_client_name = ?, po_client_email = ?,
+		 po_client_phone = ?, po_client_address = ?, po_subclient = ?
 		WHERE po_id = ?`,
-		in.OrderNum, in.RegionID, in.PicID, in.DivisionID, in.Date,
+		in.OrderNum, in.RegionID, in.PicID, picClientID, in.DivisionID, in.Date,
 		in.ClientID, in.ClientName, in.ClientEmail, in.ClientPhone, in.ClientAddr, in.SubClient, id)
 	return err
 }

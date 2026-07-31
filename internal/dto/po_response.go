@@ -44,14 +44,14 @@ func NewPOItemResponseList(items []models.POItem) []POItemResponse {
 
 // POResponse adalah representasi detail lengkap 1 PO untuk endpoint Detail.
 type POResponse struct {
-	ID        string `json:"po_id"`
-	OrderNum  string `json:"po_order_num"`
-	Invoice   string `json:"po_invoice,omitempty"`
-	Status    string `json:"po_status"`
-	Document  string `json:"po_document"`
-	Paid      string `json:"po_paid"`
-	Notes     string `json:"po_notes,omitempty"`
-	SubClient string `json:"po_subclient,omitempty"`
+	ID            string `json:"po_id"`
+	OrderNum      string `json:"po_order_num"`
+	Invoice       string `json:"po_invoice,omitempty"`
+	Status        string `json:"po_status"`
+	Document      string `json:"po_document"`
+	Paid          string `json:"po_paid"`
+	Notes         string `json:"po_notes,omitempty"`
+	SubClient     string `json:"po_subclient,omitempty"`
 
 	Subtotal  float64 `json:"po_subtotal"`
 	PpnRate   float64 `json:"po_ppn_rate"`
@@ -64,11 +64,11 @@ type POResponse struct {
 	ClientPhone string `json:"client_phone"`
 	ClientAddr  string `json:"client_address"`
 
-	AdminName    string `json:"admin_name,omitempty"`
-	PicName      string `json:"pic_name,omitempty"`
-	RegionTitle  string `json:"region_title,omitempty"`
-	DivisionName string `json:"division_title,omitempty"`
-	ProductNames []string `json:"product_names"`
+	AdminName     string `json:"admin_name,omitempty"`
+	PicName       string `json:"pic_name,omitempty"`
+	PicClientName string `json:"pic_client_name,omitempty"`
+	RegionTitle   string `json:"region_title,omitempty"`
+	DivisionName  string `json:"division_title,omitempty"`
 
 	Date         string `json:"po_date,omitempty"`
 	ExpDate      string `json:"po_exp_date,omitempty"`
@@ -115,10 +115,11 @@ func NewPOResponse(m models.PO) POResponse {
 		ClientPhone: m.ClientPhone,
 		ClientAddr:  m.ClientAddr,
 
-		AdminName:    m.AdminName,
-		PicName:      m.PicName,
-		RegionTitle:  m.RegionTitle,
-		DivisionName: m.DivisionName,
+		AdminName:     m.AdminName,
+		PicName:       m.PicName,
+		PicClientName: m.PicClientName,
+		RegionTitle:   m.RegionTitle,
+		DivisionName:  m.DivisionName,
 
 		Date:         formatDate(m.Date),
 		ExpDate:      formatDate(m.ExpDate),
@@ -150,21 +151,22 @@ func NewPOWithItemsResponse(po models.PO, items []models.POItem) POWithItemsResp
 // query list (mis. Subtotal/PpnAmount/AdminName) supaya tidak menampilkan
 // nilai kosong yang menyesatkan seolah memang bernilai 0.
 type POListItemResponse struct {
-	ID           string  `json:"po_id"`
-	OrderNum     string  `json:"po_order_num"`
-	Invoice      string  `json:"po_invoice,omitempty"`
-	Status       string  `json:"po_status"`
-	Total        float64 `json:"po_total"`
-	Document     string  `json:"po_document,omitempty"`
-	Paid         string  `json:"po_paid,omitempty"`
-	SubClient    string  `json:"po_subclient,omitempty"`
-	Date         string  `json:"po_date,omitempty"`
-	ExpDate      string  `json:"po_exp_date,omitempty"`
-	ClientName   string  `json:"client_name,omitempty"`
-	PicName      string  `json:"pic_name,omitempty"`
-	DivisionName string  `json:"division_title,omitempty"`
-	RegionTitle  string  `json:"region_title,omitempty"`
-	ProductNames []string `json:"product_names"`
+	ID            string   `json:"po_id"`
+	OrderNum      string   `json:"po_order_num"`
+	Invoice       string   `json:"po_invoice,omitempty"`
+	Status        string   `json:"po_status"`
+	Total         float64  `json:"po_total"`
+	Document      string   `json:"po_document,omitempty"`
+	Paid          string   `json:"po_paid,omitempty"`
+	SubClient     string   `json:"po_subclient,omitempty"`
+	Date          string   `json:"po_date,omitempty"`
+	ExpDate       string   `json:"po_exp_date,omitempty"`
+	ClientName    string   `json:"client_name,omitempty"`
+	PicName       string   `json:"pic_name,omitempty"`
+	PicClientName string   `json:"pic_client_name,omitempty"`
+	DivisionName  string   `json:"division_title,omitempty"`
+	RegionTitle   string   `json:"region_title,omitempty"`
+	ProductNames  []string `json:"product_names"`
 }
 
 func splitProductNames(raw string) []string {
@@ -191,21 +193,22 @@ func NewPOListItemResponse(m models.PO) POListItemResponse {
 		subClient = *m.SubClient
 	}
 	return POListItemResponse{
-		ID:           m.ID,
-		OrderNum:     m.OrderNum,
-		Invoice:      invoice,
-		Status:       m.Status,
-		Total:        m.Total,
-		Document:     m.Document,
-		Paid:         m.Paid,
-		SubClient:    subClient,
-		Date:         formatDate(m.Date),
-		ExpDate:      formatDate(m.ExpDate),
-		ClientName:   m.ClientName,
-		PicName:      m.PicName,
-		DivisionName: m.DivisionName,
-		RegionTitle:  m.RegionTitle,
-		ProductNames: splitProductNames(m.ProductNames),
+		ID:            m.ID,
+		OrderNum:      m.OrderNum,
+		Invoice:       invoice,
+		Status:        m.Status,
+		Total:         m.Total,
+		Document:      m.Document,
+		Paid:          m.Paid,
+		SubClient:     subClient,
+		Date:          formatDate(m.Date),
+		ExpDate:       formatDate(m.ExpDate),
+		ClientName:    m.ClientName,
+		PicName:       m.PicName,
+		PicClientName: m.PicClientName,
+		DivisionName:  m.DivisionName,
+		RegionTitle:   m.RegionTitle,
+		ProductNames:  splitProductNames(m.ProductNames),
 	}
 }
 

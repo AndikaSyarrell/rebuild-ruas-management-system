@@ -221,6 +221,7 @@ func (h *POHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	in := repository.NewPOInput{
 		ID: poID, OrderNum: req.OrderNum, RegionID: int(req.RegionID), AdminID: adminID, PicID: req.PicID,
+		PicClientID: req.PicClientID,
 		DivisionID: req.DivisionIDPtr(), PpnID: int(req.PpnID), PpnRate: ppn.Value, Date: date,
 		ClientID: clientID, ClientName: req.ClientName, ClientEmail: req.ClientEmail,
 		ClientPhone: req.ClientPhone, ClientAddr: req.ClientAddr, SubClient: req.SubClient, Items: items,
@@ -267,7 +268,8 @@ func (h *POHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	err = h.repo.UpdateHeader(r.Context(), id, repository.UpdatePOInput{
-		OrderNum: req.OrderNum, RegionID: int(req.RegionID), PicID: req.PicID, DivisionID: req.DivisionIDPtr(),
+		OrderNum: req.OrderNum, RegionID: int(req.RegionID), PicID: req.PicID, PicClientID: req.PicClientID,
+		DivisionID: req.DivisionIDPtr(),
 		Date: date, ClientID: int(req.ClientID), ClientName: req.ClientName, ClientEmail: req.ClientEmail,
 		ClientPhone: req.ClientPhone, ClientAddr: req.ClientAddr, SubClient: req.SubClient,
 	})

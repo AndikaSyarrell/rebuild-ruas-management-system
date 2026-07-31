@@ -36,6 +36,7 @@ type CreatePORequest struct {
 	OrderNum    string                 `json:"order_num"`
 	RegionID    utils.FlexInt          `json:"region_id"`
 	PicID       string                 `json:"pic_id"`
+	PicClientID string                 `json:"pic_client_id"` // opsional
 	DivisionID  *utils.FlexInt         `json:"division_id"`
 	PpnID       utils.FlexInt          `json:"ppn_id"`
 	Date        string                 `json:"date"`
@@ -85,6 +86,7 @@ type UpdatePORequest struct {
 	OrderNum    string         `json:"order_num"`
 	RegionID    utils.FlexInt  `json:"region_id"`
 	PicID       string         `json:"pic_id"`
+	PicClientID string         `json:"pic_client_id"` // opsional; string kosong = hapus PIC client
 	DivisionID  *utils.FlexInt `json:"division_id"`
 	Date        string         `json:"date"`
 	ClientID    utils.FlexInt  `json:"client_id"`

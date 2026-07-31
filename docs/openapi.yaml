@@ -784,30 +784,6 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "403":
           $ref: "#/components/responses/Forbidden"
-  
-  /api/access/mine:
-    get:
-      tags: [Access]
-      summary: Daftar access_slug milik admin yang sedang login
-      description: >
-        Dipakai frontend untuk membangun UI secara dinamis (menyembunyikan
-        tombol/menu sesuai hak akses) tanpa perlu mencoba endpoint dan
-        menebak dari respons 403. Cukup butuh login, tidak dibatasi
-        access_slug tertentu.
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: "#/components/schemas/ApiResponseBase"
-                  - type: object
-                    properties:
-                      data:
-                        $ref: "#/components/schemas/PermissionsResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
 
   /api/access/module/{module}:
     get:
@@ -832,6 +808,32 @@ paths:
                       data:
                         type: array
                         items: { $ref: "#/components/schemas/AccessResponse" }
+
+  /api/access/mine:
+    get:
+      tags: [Access]
+      summary: Daftar access_slug milik admin yang sedang login
+      description: >
+        Dipakai frontend untuk membangun UI secara dinamis (menyembunyikan
+        tombol/menu sesuai hak akses) tanpa perlu mencoba endpoint dan
+        menebak dari respons 403. Cukup butuh login, tidak dibatasi
+        access_slug tertentu. Diturunkan dari role admin saat request
+        (bukan dari klaim JWT), sehingga perubahan role langsung
+        ter-refleksi begitu di-refetch.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/PermissionsResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /api/access/{id}:
     parameters:
@@ -1241,10 +1243,10 @@ paths:
             enum: [open, progress, prepared, complete, cancel]
         - name: keyword
           in: query
+          description: >
+            Mencari berdasarkan nomor PO, PO ID, nama klien, sub-client,
+            ATAU nama produk pada salah satu item PO.
           schema: { type: string }
-            description: >
-             Mencari berdasarkan nomor PO, PO ID, nama klien, sub-client, ATAU
-             nama produk pada salah satu item PO.
         - name: region
           in: query
           schema: { type: integer }
@@ -2162,14 +2164,6 @@ components:
         access_module: { type: string }
         access_sort: { type: integer }
         access_create_date: { type: string, format: date-time }
-    
-    PermissionsResponse:
-      type: object
-      properties:
-        access_slugs:
-          type: array
-          items: { type: string }
-          example: ["create_po", "edit_po", "delete_client"]
 
     # --- admin ---
     CreateAdminRequest:
@@ -2266,7 +2260,15 @@ components:
       properties:
         order_num: { type: string }
         region_id: { type: integer }
-        pic_id: { type: string }
+        pic_id:
+          type: string
+          description: Admin yang menangani project/PO
+        pic_client_id:
+          type: string
+          description: >
+            Opsional. Admin yang menangani relasi ke klien, terpisah dari
+            pic_id (PIC project). Kosongkan kalau PO ini tidak punya PIC
+            client spesifik.
         division_id: { type: integer, nullable: true }
         ppn_id: { type: integer }
         date: { type: string, format: date }
@@ -2289,7 +2291,14 @@ components:
       properties:
         order_num: { type: string }
         region_id: { type: integer }
-        pic_id: { type: string }
+        pic_id:
+          type: string
+          description: Admin yang menangani project/PO
+        pic_client_id:
+          type: string
+          description: >
+            Opsional. Admin yang menangani relasi ke klien. Kirim string
+            kosong untuk menghapus PIC client dari PO ini.
         division_id: { type: integer, nullable: true }
         date: { type: string, format: date }
         client_id: { type: integer }
@@ -2367,7 +2376,8 @@ components:
         client_phone: { type: string }
         client_address: { type: string }
         admin_name: { type: string }
-        pic_name: { type: string }
+        pic_name: { type: string, description: "Nama admin PIC project (po_ref_pic)" }
+        pic_client_name: { type: string, description: "Nama admin PIC client (po_ref_pic_client), kosong kalau tidak diisi" }
         region_title: { type: string }
         division_title: { type: string }
         po_date: { type: string, format: date }
@@ -2402,13 +2412,14 @@ components:
         po_date: { type: string, format: date }
         po_exp_date: { type: string, format: date }
         client_name: { type: string }
-        pic_name: { type: string }
+        pic_name: { type: string, description: "Nama admin PIC project" }
+        pic_client_name: { type: string, description: "Nama admin PIC client, kosong kalau tidak diisi" }
         division_title: { type: string }
         region_title: { type: string }
-        product_names:           
-         type: array
-         items: { type: string }
-         description: Seluruh nama produk pada PO ini, untuk ditampilkan sebagai konteks di hasil pencarian
+        product_names:
+          type: array
+          items: { type: string }
+          description: Seluruh nama produk pada PO ini (untuk konteks hasil pencarian berdasarkan produk)
 
     StatusCounts:
       type: object
@@ -2453,8 +2464,16 @@ components:
         total_prepared: { type: integer }
         total_complete: { type: integer }
         total_cancel: { type: integer }
-        total_paid: { type: integer }      # baru
-        total_unpaid: { type: integer }    # baru
+        total_paid: { type: integer }
+        total_unpaid: { type: integer }
         recent_open_po:
           type: array
           items: { $ref: "#/components/schemas/POListItemResponse" }
+
+    PermissionsResponse:
+      type: object
+      properties:
+        access_slugs:
+          type: array
+          items: { type: string }
+          example: ["create_po", "edit_po", "delete_client"]
