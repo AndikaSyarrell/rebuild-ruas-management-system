@@ -267,11 +267,31 @@ func (h *POHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	clientID := int(req.ClientID)
+	clientName, clientEmail := req.ClientName, req.ClientEmail
+	clientPhone, clientAddr := req.ClientPhone, req.ClientAddr
+
+	if clientID != 0 {
+		existingClient, err := h.clientRepo.GetByID(r.Context(), clientID)
+		if err != nil {
+			utils.Error(w, http.StatusBadRequest,
+				fmt.Sprintf("Client dengan id %d tidak ditemukan", clientID))
+			return
+		}
+		clientName = existingClient.Name
+		clientEmail = existingClient.Email
+		clientPhone = existingClient.Phone
+		clientAddr = existingClient.Address
+	} else if clientName == "" || clientEmail == "" {
+		utils.Error(w, http.StatusBadRequest, "Data klien tidak lengkap")
+		return
+	}
+
 	err = h.repo.UpdateHeader(r.Context(), id, repository.UpdatePOInput{
 		OrderNum: req.OrderNum, RegionID: int(req.RegionID), PicID: req.PicID, PicClientID: req.PicClientID,
-		DivisionID: req.DivisionIDPtr(),
-		Date: date, ClientID: int(req.ClientID), ClientName: req.ClientName, ClientEmail: req.ClientEmail,
-		ClientPhone: req.ClientPhone, ClientAddr: req.ClientAddr, SubClient: req.SubClient,
+		DivisionID: req.DivisionIDPtr(), Date: date,
+		ClientID: clientID, ClientName: clientName, ClientEmail: clientEmail,
+		ClientPhone: clientPhone, ClientAddr: clientAddr, SubClient: req.SubClient,
 	})
 	if err != nil {
 		utils.Error(w, http.StatusInternalServerError, "Gagal memperbarui PO")

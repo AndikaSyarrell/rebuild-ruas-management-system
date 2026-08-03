@@ -17,6 +17,7 @@ type POItemResponse struct {
 	Qty       int     `json:"item_qty"`
 	Price     float64 `json:"item_price"`
 	UnitTitle string  `json:"unit_title,omitempty"`
+	UnitID    int     `json:"unit_id"`
 }
 
 func NewPOItemResponse(m models.POItem) POItemResponse {
@@ -31,6 +32,7 @@ func NewPOItemResponse(m models.POItem) POItemResponse {
 		Qty:       m.Qty,
 		Price:     m.Price,
 		UnitTitle: m.UnitTitle,
+		UnitID:    m.RefUnit,
 	}
 }
 
@@ -44,20 +46,27 @@ func NewPOItemResponseList(items []models.POItem) []POItemResponse {
 
 // POResponse adalah representasi detail lengkap 1 PO untuk endpoint Detail.
 type POResponse struct {
-	ID            string `json:"po_id"`
-	OrderNum      string `json:"po_order_num"`
-	Invoice       string `json:"po_invoice,omitempty"`
-	Status        string `json:"po_status"`
-	Document      string `json:"po_document"`
-	Paid          string `json:"po_paid"`
-	Notes         string `json:"po_notes,omitempty"`
-	SubClient     string `json:"po_subclient,omitempty"`
+	ID        string `json:"po_id"`
+	OrderNum  string `json:"po_order_num"`
+	Invoice   string `json:"po_invoice,omitempty"`
+	Status    string `json:"po_status"`
+	Document  string `json:"po_document"`
+	Paid      string `json:"po_paid"`
+	Notes     string `json:"po_notes,omitempty"`
+	SubClient string `json:"po_subclient,omitempty"`
 
 	Subtotal  float64 `json:"po_subtotal"`
 	PpnRate   float64 `json:"po_ppn_rate"`
 	PpnAmount float64 `json:"po_ppn_amount"`
 	Total     float64 `json:"po_total"`
 	ItemTotal int     `json:"po_item_total"`
+
+	RegionID    int    `json:"region_id"`
+	PicID       string `json:"pic_id"`
+	PicClientID string `json:"pic_client_id,omitempty"`
+	DivisionID  *int   `json:"division_id"`
+	PpnID       int    `json:"ppn_id"`
+	ClientID    int    `json:"client_id"`
 
 	ClientName  string `json:"client_name"`
 	ClientEmail string `json:"client_email"`
@@ -93,6 +102,10 @@ func NewPOResponse(m models.PO) POResponse {
 	if m.SubClient != nil {
 		subClient = *m.SubClient
 	}
+	picClientID := ""
+	if m.RefPicClient != nil {
+		picClientID = *m.RefPicClient
+	}
 
 	return POResponse{
 		ID:        m.ID,
@@ -109,6 +122,13 @@ func NewPOResponse(m models.PO) POResponse {
 		PpnAmount: m.PpnAmount,
 		Total:     m.Total,
 		ItemTotal: m.ItemTotal,
+
+		RegionID:    m.RefRegion,
+		PicID:       m.RefPic,
+		PicClientID: picClientID,
+		DivisionID:  m.RefDivision,
+		PpnID:       m.RefPpn,
+		ClientID:    m.RefClient,
 
 		ClientName:  m.ClientName,
 		ClientEmail: m.ClientEmail,
