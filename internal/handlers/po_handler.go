@@ -178,6 +178,10 @@ func (h *POHandler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 		existingClient, err := h.clientRepo.GetByEmail(r.Context(), req.ClientEmail)
 		if err == nil && existingClient != nil {
+			if existingClient.Active != "yes" {
+				utils.Error(w, http.StatusBadRequest, "Klien dengan email tersebut sudah terdaftar namun berstatus nonaktif")
+				return
+			}
 			clientID = existingClient.ID
 			req.ClientName = existingClient.Name
 			req.ClientPhone = existingClient.Phone
@@ -195,6 +199,10 @@ func (h *POHandler) Create(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			utils.Error(w, http.StatusBadRequest,
 				fmt.Sprintf("Client dengan id %d tidak ditemukan, isi data client secara lengkap (client_name, client_email, client_phone, client_address) untuk membuat client baru", clientID))
+			return
+		}
+		if existingClient.Active != "yes" {
+			utils.Error(w, http.StatusBadRequest, "Klien ini berstatus nonaktif, tidak dapat dipakai untuk membuat PO baru")
 			return
 		}
 		req.ClientName = existingClient.Name
