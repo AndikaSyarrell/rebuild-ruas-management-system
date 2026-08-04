@@ -286,6 +286,10 @@ func (h *POHandler) Update(w http.ResponseWriter, r *http.Request) {
 				fmt.Sprintf("Client dengan id %d tidak ditemukan", clientID))
 			return
 		}
+		if existingClient.Active != "yes" {
+			utils.Error(w, http.StatusBadRequest, "Klien ini berstatus nonaktif, tidak dapat dipakai untuk update PO baru")
+			return
+		}
 		clientName = existingClient.Name
 		clientEmail = existingClient.Email
 		clientPhone = existingClient.Phone
