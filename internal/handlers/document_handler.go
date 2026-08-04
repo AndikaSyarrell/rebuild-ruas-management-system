@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"mime"
 
 	"github.com/go-chi/chi/v5"
 
@@ -160,4 +161,36 @@ func (h *DocumentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	utils.OK(w, "Dokumen berhasil dihapus", nil)
+}
+
+func (h *DocumentHandler) Download(w http.ResponseWriter, r *http.Request) {
+	docID, ok := utils.ParseIDParam(w, chi.URLParam(r, "docId"))
+	if !ok {
+		return
+	}
+	doc, err := h.repo.GetByID(r.Context(), docID)
+	if err != nil {
+		utils.Error(w, http.StatusNotFound, "Dokumen tidak ditemukan")
+		return
+	}
+
+	fullPath := filepath.Join(h.uploadDir, "..", doc.File)
+	f, err := os.Open(fullPath)
+	if err != nil {
+		utils.Error(w, http.StatusNotFound, "File dokumen tidak ditemukan di server")
+		return
+	}
+	defer f.Close()
+
+	ext := strings.ToLower(filepath.Ext(doc.File))
+	contentType := mime.TypeByExtension(ext)
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	w.Header().Set("Content-Type", contentType)
+	// "inline" (bukan "attachment") - browser boleh preview langsung (PDF/gambar
+	// tampil di tab), frontend yang menentukan apakah dibuka tab baru (preview)
+	// atau dipaksa save-as (download) lewat atribut <a download> di sisi client.
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`inline; filename="%s"`, doc.Title))
+	io.Copy(w, f)
 }

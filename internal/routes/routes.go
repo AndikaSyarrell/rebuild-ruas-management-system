@@ -250,6 +250,7 @@ func New(d *Dependencies) http.Handler {
 			rt.With(requireAccess("create_notes")).Post("/{id}/notes-activity", d.ActivityHandler.AddNote)
 
 			rt.Get("/{id}/documents", d.DocumentHandler.ListByPO)
+			rt.Get("/{id}/documents/{docId}/download", d.DocumentHandler.Download)
 			rt.With(requireAccess("upload_document")).Post("/{id}/documents", d.DocumentHandler.Upload)
 			rt.With(requireAccess("upload_document")).Delete("/{id}/documents/{docId}", d.DocumentHandler.Delete)
 		})
