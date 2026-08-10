@@ -1,0 +1,39 @@
+// backend/cors.go.example
+// Sama seperti versi non-docker, hanya catatan .env yang berbeda.
+
+package main
+
+import (
+	"net/http"
+	"os"
+)
+
+func corsMiddleware(next http.Handler) http.Handler {
+	allowedOrigin := os.Getenv("ALLOWED_ORIGIN")
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
+
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+// Contoh isi .env container (blue.env / green.env), PENTING beda dari versi
+// non-docker: REDIS_URL memakai NAMA CONTAINER redis (via Docker network
+// "app-net"), bukan 127.0.0.1 — karena backend jalan di container terpisah.
+//
+//   PORT=8080
+//   JWT_SECRET=ganti-dengan-secret-kuat
+//   REDIS_URL=redis://redis:6379/0
+//   ALLOWED_ORIGIN=https://domain.com
+//
+// Pastikan aplikasi listen di PORT=8080 (port internal container), karena
+// port host (3001/3002 dst) hanya dipetakan lewat `docker run -p`.
