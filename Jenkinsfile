@@ -3,7 +3,7 @@
 // Branch: Prod -> production, Test -> staging
 
 pipeline {
-    agent any
+    agent {label: 'docker'}
 
     environment {
         APP_NAME       = 'backend-rms'
