@@ -3,14 +3,14 @@
 // Branch: Prod -> production, Test -> staging
 
 pipeline {
-    agent {label: 'docker'}
+    agent {label 'docker'}
 
     environment {
         APP_NAME       = 'backend-rms'
         SSH_CRED_ID    = 'jenkins-agent'
         REGISTRY_CRED  = 'docker-registry-cred'   // Username/Password credential
         REGISTRY       = 'registry.rusera.co.id'    // ganti sesuai registry Anda (bisa Docker Hub / GHCR / self-hosted)
-        DOCKER_NETWORK = 'rms-rusera'                 // dibuat sekali di VPS, dipakai bareng backend, frontend, redis
+        DOCKER_NETWORK = 'rms-rebuild'                 // dibuat sekali di VPS, dipakai bareng backend, frontend, redis
         HEALTH_PATH    = '/health'
     }
 
@@ -28,6 +28,7 @@ pipeline {
                     if (env.BRANCH_NAME == 'main') {
                         env.DEPLOY_ENV    = 'production'
                         env.REMOTE_HOST   = '76.13.198.101'
+                        env.REMOTE_PORT    = '1818'
                         env.REMOTE_USER   = 'jenkins-agent'
                         env.STATE_DIR     = '/var/www/Rebuild-RMS/rebuild-rms-backend'
                         env.PORT_BLUE     = '3001'
@@ -36,6 +37,7 @@ pipeline {
                     } else if (env.BRANCH_NAME == 'Test') {
                         env.DEPLOY_ENV    = 'staging'
                         env.REMOTE_HOST   = '76.13.198.101'
+                        env.REMOTE_PORT    = '1818'
                         env.REMOTE_USER   = 'jenkins-agent'
                         env.STATE_DIR     = '/var/www/Rebuild-RMS/rebuild-rms-backend'
                         env.PORT_BLUE     = '4001'
@@ -82,7 +84,7 @@ pipeline {
                     script {
                         env.ACTIVE_COLOR = sh(
                             script: """
-                                ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} \
+                                ssh -o StrictHostKeyChecking=no -p ${REMOTE_PORT} ${REMOTE_USER}@${REMOTE_HOST} \
                                 'cat ${STATE_DIR}/active_color 2>/dev/null || echo none'
                             """,
                             returnStdout: true
@@ -106,8 +108,8 @@ pipeline {
                 withCredentials([file(credentialsId: env.ENV_FILE_CRED, variable: 'ENV_FILE')]) {
                     sshagent(credentials: [env.SSH_CRED_ID]) {
                         sh """
-                            ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} 'mkdir -p ${STATE_DIR}'
-                            scp -o StrictHostKeyChecking=no "\$ENV_FILE" \
+                            ssh -o StrictHostKeyChecking=no -p ${REMOTE_PORT} ${REMOTE_USER}@${REMOTE_HOST} 'mkdir -p ${STATE_DIR}'
+                            scp -o StrictHostKeyChecking=no -P ${REMOTE_PORT} "\$ENV_FILE" \
                                 ${REMOTE_USER}@${REMOTE_HOST}:${STATE_DIR}/${TARGET_COLOR}.env
                         """
                     }
@@ -119,7 +121,7 @@ pipeline {
             steps {
                 sshagent(credentials: [env.SSH_CRED_ID]) {
                     sh """
-                        ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} '
+                        ssh -o StrictHostKeyChecking=no -p ${REMOTE_PORT} ${REMOTE_USER}@${REMOTE_HOST} '
                             docker pull ${IMAGE_TAG}
                             docker rm -f ${APP_NAME}-${DEPLOY_ENV}-${TARGET_COLOR} 2>/dev/null || true
                             docker run -d \
@@ -142,7 +144,7 @@ pipeline {
                         def code = sh(
                             script: """
                                 sleep 3
-                                ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} \
+                                ssh -o StrictHostKeyChecking=no -p ${REMOTE_PORT} ${REMOTE_USER}@${REMOTE_HOST} \
                                 'curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:${TARGET_PORT}${HEALTH_PATH} --max-time 5'
                             """,
                             returnStdout: true
@@ -150,7 +152,7 @@ pipeline {
 
                         if (code != '200') {
                             sh """
-                                ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} \
+                                ssh -o StrictHostKeyChecking=no -p ${REMOTE_PORT} ${REMOTE_USER}@${REMOTE_HOST} \
                                 'docker logs --tail 50 ${APP_NAME}-${DEPLOY_ENV}-${TARGET_COLOR}'
                             """
                             error "Health check gagal di ${TARGET_COLOR} (HTTP ${code}). Container lama tetap melayani traffic."
@@ -165,7 +167,7 @@ pipeline {
             steps {
                 sshagent(credentials: [env.SSH_CRED_ID]) {
                     sh """
-                        ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} '
+                        ssh -o StrictHostKeyChecking=no -p ${REMOTE_PORT} ${REMOTE_USER}@${REMOTE_HOST} '
                             echo ${TARGET_COLOR} | sudo tee ${STATE_DIR}/active_color > /dev/null
                             sudo ln -sfn /etc/nginx/snippets/backend-${DEPLOY_ENV}-${TARGET_COLOR}.conf \
                                 /etc/nginx/snippets/backend-${DEPLOY_ENV}-active.conf
@@ -182,7 +184,7 @@ pipeline {
                     script {
                         def oldColor = (env.TARGET_COLOR == 'blue') ? 'green' : 'blue'
                         sh """
-                            ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} '
+                            ssh -o StrictHostKeyChecking=no -p ${REMOTE_PORT} ${REMOTE_USER}@${REMOTE_HOST} '
                                 sleep 5
                                 docker stop ${APP_NAME}-${DEPLOY_ENV}-${oldColor} 2>/dev/null || true
                             '
@@ -197,7 +199,7 @@ pipeline {
             steps {
                 sshagent(credentials: [env.SSH_CRED_ID]) {
                     sh """
-                        ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} \
+                        ssh -o StrictHostKeyChecking=no -p ${REMOTE_PORT} ${REMOTE_USER}@${REMOTE_HOST} \
                         'docker image prune -f --filter "until=72h"'
                     """
                 }
