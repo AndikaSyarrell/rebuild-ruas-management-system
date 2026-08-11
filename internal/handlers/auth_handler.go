@@ -3,6 +3,10 @@ package handlers
 import (
 	"errors"
 	"net/http"
+	"fmt"
+	"database/sql"
+	"golang.org/x/crypto/bcrypt"
+	"context"
 
 	"rms-backend/internal/dto"
 	"rms-backend/internal/middleware"
@@ -70,15 +74,38 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		message := "Login gagal"
 		clientMsg := "Email atau password salah"
 
-		if errors.Is(err, service.ErrAccountInactive) {
+		// --- DEBUG: log the SPECIFIC underlying reason internally ---
+		// Client always sees the generic message above (don't change that —
+		// leaking "user not found" vs "wrong password" is a security smell).
+		// But we need to know which branch actually triggered, so log it.
+		debugReason := "unknown"
+		switch {
+		case errors.Is(err, service.ErrAccountInactive):
 			message = "Login gagal: akun nonaktif"
 			clientMsg = "Akun tidak aktif, hubungi administrator"
+			debugReason = "account_inactive"
+		case errors.Is(err, sql.ErrNoRows):
+			debugReason = "user_not_found_in_db"
+		case errors.Is(err, bcrypt.ErrMismatchedHashAndPassword):
+			debugReason = "password_hash_mismatch"
+		case errors.Is(err, context.DeadlineExceeded):
+			debugReason = "db_query_timeout"
+		default:
+			// This is the one to watch for right now — if it hits "default",
+			// authService.Login is returning an error type we don't recognize
+			// here, which means it's NOT sql.ErrNoRows or bcrypt mismatch.
+			// That points at a query/scan bug, not a credentials bug.
+			debugReason = fmt.Sprintf("unclassified: %v", err)
 		}
 
 		h.logger.Log(service.LogEntry{
 			Module: "auth", Action: "login_failed", Status: service.LogStatusWarning, Message: message,
 			IP: ip, UserAgent: userAgent,
-			Metadata: map[string]any{"email": req.Email},
+			Metadata: map[string]any{
+				"email":        req.Email,
+				"debug_reason": debugReason,
+				"raw_error":    err.Error(), // remove once bug is found — don't leave raw errors in logs long-term
+			},
 		})
 
 		utils.Error(w, http.StatusUnauthorized, clientMsg)

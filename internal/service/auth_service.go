@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"time"
+	"log"
 
 	"github.com/redis/go-redis/v9"
 
@@ -39,22 +40,41 @@ func blacklistKey(jti string) string      { return "auth:blacklist:" + jti }
 func (s *AuthService) Login(ctx context.Context, email, password string) (*TokenPair, *models.Admin, error) {
 	admin, err := s.admins.GetByEmail(ctx, email)
 	if errors.Is(err, sql.ErrNoRows) {
+		log.Printf("[LOGIN DEBUG] user not found for email=%q", email)
 		return nil, nil, ErrInvalidCredentials
 	}
 	if err != nil {
+		log.Printf("[LOGIN DEBUG] GetByEmail query error: %v", err)
 		return nil, nil, err
 	}
 
+	// DEBUG: confirm exactly what was fetched from the DB
+	log.Printf("[LOGIN DEBUG] fetched admin id=%v email=%v active=%q password_is_nil=%v",
+		admin.ID, admin.Email, admin.Active, admin.Password == nil)
+
 	if admin.Active != "active" {
+		log.Printf("[LOGIN DEBUG] rejected: active column = %q (expected exact string \"active\")", admin.Active)
 		return nil, nil, ErrAccountInactive
 	}
 
-	if admin.Password == nil || !utils.CheckPassword(*admin.Password, password) {
+	if admin.Password == nil {
+		log.Printf("[LOGIN DEBUG] rejected: admin.Password is nil")
+		return nil, nil, ErrInvalidCredentials
+	}
+
+	// DEBUG: log lengths, not raw values, so you're not putting real
+	// passwords/hashes in plaintext logs
+	match := utils.CheckPassword(*admin.Password, password)
+	log.Printf("[LOGIN DEBUG] CheckPassword result=%v hash_len=%d input_password_len=%d",
+		match, len(*admin.Password), len(password))
+
+	if !match {
 		return nil, nil, ErrInvalidCredentials
 	}
 
 	pair, err := s.issueTokenPair(ctx, admin)
 	if err != nil {
+		log.Printf("[LOGIN DEBUG] issueTokenPair failed: %v", err)
 		return nil, nil, err
 	}
 	return pair, admin, nil
