@@ -11,7 +11,7 @@ pipeline {
         REGISTRY_CRED  = 'docker-registry-cred'   // Username/Password credential
         REGISTRY       = 'registry.rusera.co.id'    // ganti sesuai registry Anda (bisa Docker Hub / GHCR / self-hosted)
         DOCKER_NETWORK = 'rms-rebuild'                 // dibuat sekali di VPS, dipakai bareng backend, frontend, redis
-        HEALTH_PATH    = '/health'
+        HEALTH_PATH    = '/healthz'
     }
 
     options {
