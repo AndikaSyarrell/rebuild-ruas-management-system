@@ -8,7 +8,7 @@ pipeline {
     environment {
         APP_NAME       = 'backend-rms'
         SSH_CRED_ID    = 'jenkins-agent'
-        REGISTRY_CRED  = 'rusera-registry'   // Username/Password credential
+        REGISTRY_CRED  = 'docker-registry-cred'   // Username/Password credential
         REGISTRY       = 'registry.rusera.co.id'    // ganti sesuai registry Anda (bisa Docker Hub / GHCR / self-hosted)
         DOCKER_NETWORK = 'rms-rusera'                 // dibuat sekali di VPS, dipakai bareng backend, frontend, redis
         HEALTH_PATH    = '/health'
