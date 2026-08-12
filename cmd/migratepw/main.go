@@ -2,6 +2,10 @@
 // decrypt_key) lalu me-re-hash hasil plaintext-nya memakai bcrypt (utils.HashPassword),
 // kemudian menuliskan UPDATE T_Admin SET admin_password = ? WHERE admin_id = ?.
 //
+// Koneksi database memakai config.LoadDotEnv + config.Load + db.New, mengikuti
+// pola yang sama seperti cmd/api. Jalankan dari root project (sejajar go.mod)
+// supaya file .env terbaca, atau export kredensial DB manual sebelum menjalankan.
+//
 // PENTING soal turunan key/iv (mengikuti PERSIS logika PHP openssl_decrypt):
 //   - PHP: hash('sha256', $secret_key) menghasilkan STRING HEX 64 karakter.
 //     openssl_decrypt tidak men-decode hex ini ke biner - ia hanya memotong string
@@ -9,15 +13,9 @@
 //   - Sama untuk IV: substr(hash('sha256', $secret_iv), 0, 16) -> 16 karakter
 //     pertama dari hex string dipakai APA ADANYA sebagai 16 byte IV.
 //
-// SECRET_KEY dan SECRET_IV di bawah WAJIB diisi sama persis dengan nilai
-// $secret_key / $secret_iv di kode PHP kamu sebelum menjalankan tool ini.
-// Sudah tidak lagi berupa flag CLI - edit langsung di sini, sekali saja.
-//
 // Pemakaian:
 //
-//	go run ./cmd/migratepw \
-//	  -dsn "user:pass@tcp(127.0.0.1:3306)/rms?parseTime=true&charset=utf8mb4" \
-//	  -dry-run=true
+//	go run ./cmd/migratepw -secret-key "warehouse key" -secret-iv "warehouse iv" -dry-run=true
 //
 // Jalankan dulu dengan -dry-run=true untuk melihat preview (admin_id + apakah decrypt
 // sukses) TANPA menyentuh database. Setelah yakin benar, jalankan ulang -dry-run=false.
@@ -27,7 +25,6 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
@@ -37,49 +34,52 @@ import (
 	"strings"
 
 	_ "github.com/go-sql-driver/mysql"
-	"golang.org/x/crypto/bcrypt"
-)
 
-const bcryptCost = 12
-
-// ====== WAJIB DIISI: samakan dengan $secret_key / $secret_iv di PHP ======
-const (
-	SecretKey = "warehouse key" // ganti dengan nilai asli di production
-	SecretIV  = "warehouse iv"  // ganti dengan nilai asli di production
+	"rms-backend/internal/config" // TODO: ganti "rms-backend/internal" dengan module path project kamu (lihat go.mod)
+	"rms-backend/internal/db"
+	"rms-backend/internal/utils"
 )
 
 func main() {
-	dsn := flag.String("dsn", "", "DSN MySQL, contoh: user:pass@tcp(127.0.0.1:3306)/rms?parseTime=true&charset=utf8mb4")
+	secretKey := flag.String("secret-key", "warehouse key", "warehouse key")
+	secretIV := flag.String("secret-iv", "warehouse iv", "warehouse iv")
 	dryRun := flag.Bool("dry-run", true, "jika true, hanya menampilkan hasil tanpa UPDATE ke DB")
 	testValue := flag.String("test-value", "", "opsional: satu nilai admin_password (base64) untuk uji decrypt saja, lalu keluar")
+	showPlaintext := flag.Bool("show-plaintext", false, "PERINGATAN: jika true, plaintext hasil decrypt ikut dicetak ke terminal untuk verifikasi manual. Jangan aktifkan di lingkungan yang ter-log/ter-share.")
 	flag.Parse()
 
-	key, iv := deriveKeyIV(SecretKey, SecretIV)
+	if *showPlaintext {
+		fmt.Println("!!! -show-plaintext AKTIF: password asli akan tercetak ke terminal di bawah ini. Pastikan output tidak ter-log/ter-screenshot/ter-share. !!!")
+	}
 
-	// Mode uji cepat: cek satu nilai dulu sebelum jalan ke seluruh tabel.
+	key, iv := deriveKeyIV(*secretKey, *secretIV)
+
+	// Mode uji cepat: cek satu nilai dulu, tidak perlu koneksi DB.
 	if *testValue != "" {
 		plain, err := decryptLegacy(*testValue, key, iv)
 		if err != nil {
 			log.Fatalf("decrypt gagal: %v", err)
 		}
-		fmt.Printf("plaintext hasil decrypt: %q\n", plain)
+		fmt.Printf("decrypt sukses, panjang plaintext: %d karakter\n", len(plain))
+		if *showPlaintext {
+			fmt.Printf("plaintext hasil decrypt: %q\n", plain)
+		}
 		return
 	}
 
-	if *dsn == "" {
-		log.Fatal("wajib isi -dsn (atau pakai -test-value untuk uji satu nilai saja)")
-	}
+	// ====== Koneksi DB pakai config .env, sama seperti cmd/api ======
+	config.LoadDotEnv(".env")
+	cfg := config.Load()
 
-	db, err := sql.Open("mysql", *dsn)
+	sqlDB, err := db.New(db.Config{
+		Host: cfg.DBHost, Port: cfg.DBPort, User: cfg.DBUser, Password: cfg.DBPass, Name: cfg.DBName,
+	})
 	if err != nil {
-		log.Fatalf("gagal buka koneksi: %v", err)
+		log.Fatalf("gagal konek database: %v", err)
 	}
-	defer db.Close()
-	if err := db.Ping(); err != nil {
-		log.Fatalf("gagal konek db: %v", err)
-	}
+	defer sqlDB.Close()
 
-	rows, err := db.Query(`SELECT admin_id, admin_password FROM T_Admin WHERE admin_password IS NOT NULL AND admin_password != ''`)
+	rows, err := sqlDB.Query(`SELECT admin_id, admin_password FROM T_Admin WHERE admin_password IS NOT NULL AND admin_password != ''`)
 	if err != nil {
 		log.Fatalf("gagal query: %v", err)
 	}
@@ -105,13 +105,17 @@ func main() {
 			continue
 		}
 
-		newHash, err := bcrypt.GenerateFromPassword([]byte(plain), bcryptCost)
+		newHash, err := utils.HashPassword(plain)
 		if err != nil {
 			log.Fatalf("gagal bcrypt untuk %s: %v", id, err)
 		}
 
-		fmt.Printf("[OK] admin_id=%s plaintext_len=%d -> bcrypt siap\n", id, len(plain))
-		toUpdate = append(toUpdate, pending{id: id, newHash: string(newHash)})
+		if *showPlaintext {
+			fmt.Printf("[OK] admin_id=%s plaintext=%q -> bcrypt siap\n", id, plain)
+		} else {
+			fmt.Printf("[OK] admin_id=%s plaintext_len=%d -> bcrypt siap\n", id, len(plain))
+		}
+		toUpdate = append(toUpdate, pending{id: id, newHash: newHash})
 	}
 	if err := rows.Err(); err != nil {
 		log.Fatalf("rows error: %v", err)
@@ -130,7 +134,7 @@ func main() {
 		return
 	}
 
-	tx, err := db.Begin()
+	tx, err := sqlDB.Begin()
 	if err != nil {
 		log.Fatalf("gagal begin tx: %v", err)
 	}
