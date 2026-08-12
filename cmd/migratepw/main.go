@@ -9,12 +9,14 @@
 //   - Sama untuk IV: substr(hash('sha256', $secret_iv), 0, 16) -> 16 karakter
 //     pertama dari hex string dipakai APA ADANYA sebagai 16 byte IV.
 //
+// SECRET_KEY dan SECRET_IV di bawah WAJIB diisi sama persis dengan nilai
+// $secret_key / $secret_iv di kode PHP kamu sebelum menjalankan tool ini.
+// Sudah tidak lagi berupa flag CLI - edit langsung di sini, sekali saja.
+//
 // Pemakaian:
 //
 //	go run ./cmd/migratepw \
 //	  -dsn "user:pass@tcp(127.0.0.1:3306)/rms?parseTime=true&charset=utf8mb4" \
-//	  -secret-key "warehouse key" \
-//	  -secret-iv "warehouse iv" \
 //	  -dry-run=true
 //
 // Jalankan dulu dengan -dry-run=true untuk melihat preview (admin_id + apakah decrypt
@@ -40,15 +42,19 @@ import (
 
 const bcryptCost = 12
 
+// ====== WAJIB DIISI: samakan dengan $secret_key / $secret_iv di PHP ======
+const (
+	SecretKey = "warehouse key" // ganti dengan nilai asli di production
+	SecretIV  = "warehouse iv"  // ganti dengan nilai asli di production
+)
+
 func main() {
 	dsn := flag.String("dsn", "", "DSN MySQL, contoh: user:pass@tcp(127.0.0.1:3306)/rms?parseTime=true&charset=utf8mb4")
-	secretKey := flag.String("secret-key", "warehouse key", "nilai $secret_key di PHP")
-	secretIV := flag.String("secret-iv", "warehouse iv", "nilai $secret_iv di PHP")
 	dryRun := flag.Bool("dry-run", true, "jika true, hanya menampilkan hasil tanpa UPDATE ke DB")
 	testValue := flag.String("test-value", "", "opsional: satu nilai admin_password (base64) untuk uji decrypt saja, lalu keluar")
 	flag.Parse()
 
-	key, iv := deriveKeyIV(*secretKey, *secretIV)
+	key, iv := deriveKeyIV(SecretKey, SecretIV)
 
 	// Mode uji cepat: cek satu nilai dulu sebelum jalan ke seluruh tabel.
 	if *testValue != "" {
