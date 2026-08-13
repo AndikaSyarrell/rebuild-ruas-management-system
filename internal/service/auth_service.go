@@ -6,6 +6,7 @@ import (
 	"errors"
 	"time"
 	"log"
+	"os"
 
 	"github.com/redis/go-redis/v9"
 
@@ -13,6 +14,18 @@ import (
 	"rms-backend/internal/repository"
 	"rms-backend/internal/utils"
 )
+
+// authDebugEnabled mengontrol apakah log [LOGIN DEBUG] dicetak. Log ini
+// sebelumnya selalu aktif (termasuk di production), yang berisiko membocorkan
+// detail internal (email, admin id, status akun) ke log server. Sekarang
+// hanya aktif saat APP_ENV=development.
+var authDebugEnabled = os.Getenv("APP_ENV") == "development"
+
+func authDebugf(format string, args ...interface{}) {
+	if authDebugEnabled {
+		log.Printf(format, args...)
+	}
+}
 
 type TokenPair struct {
 	AccessToken  string `json:"access_token"`
@@ -40,32 +53,32 @@ func blacklistKey(jti string) string      { return "auth:blacklist:" + jti }
 func (s *AuthService) Login(ctx context.Context, email, password string) (*TokenPair, *models.Admin, error) {
 	admin, err := s.admins.GetByEmail(ctx, email)
 	if errors.Is(err, sql.ErrNoRows) {
-		log.Printf("[LOGIN DEBUG] user not found for email=%q", email)
+		authDebugf("[LOGIN DEBUG] user not found for email=%q", email)
 		return nil, nil, ErrInvalidCredentials
 	}
 	if err != nil {
-		log.Printf("[LOGIN DEBUG] GetByEmail query error: %v", err)
+		authDebugf("[LOGIN DEBUG] GetByEmail query error: %v", err)
 		return nil, nil, err
 	}
 
 	// DEBUG: confirm exactly what was fetched from the DB
-	log.Printf("[LOGIN DEBUG] fetched admin id=%v email=%v active=%q password_is_nil=%v",
+	authDebugf("[LOGIN DEBUG] fetched admin id=%v email=%v active=%q password_is_nil=%v",
 		admin.ID, admin.Email, admin.Active, admin.Password == nil)
 
 	if admin.Active != "active" {
-		log.Printf("[LOGIN DEBUG] rejected: active column = %q (expected exact string \"active\")", admin.Active)
+		authDebugf("[LOGIN DEBUG] rejected: active column = %q (expected exact string \"active\")", admin.Active)
 		return nil, nil, ErrAccountInactive
 	}
 
 	if admin.Password == nil {
-		log.Printf("[LOGIN DEBUG] rejected: admin.Password is nil")
+		authDebugf("[LOGIN DEBUG] rejected: admin.Password is nil")
 		return nil, nil, ErrInvalidCredentials
 	}
 
 	// DEBUG: log lengths, not raw values, so you're not putting real
 	// passwords/hashes in plaintext logs
 	match := utils.CheckPassword(*admin.Password, password)
-	log.Printf("[LOGIN DEBUG] CheckPassword result=%v hash_len=%d input_password_len=%d",
+	authDebugf("[LOGIN DEBUG] CheckPassword result=%v hash_len=%d input_password_len=%d",
 		match, len(*admin.Password), len(password))
 
 	if !match {
@@ -74,10 +87,16 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (*Token
 
 	pair, err := s.issueTokenPair(ctx, admin)
 	if err != nil {
-		log.Printf("[LOGIN DEBUG] issueTokenPair failed: %v", err)
+		authDebugf("[LOGIN DEBUG] issueTokenPair failed: %v", err)
 		return nil, nil, err
 	}
 	return pair, admin, nil
+}
+
+// RefreshTTL mengekspos umur refresh token agar handler bisa mengatur
+// Max-Age cookie tanpa perlu tahu detail JWTManager.
+func (s *AuthService) RefreshTTL() time.Duration {
+	return s.jwt.RefreshTTL()
 }
 
 func (s *AuthService) issueTokenPair(ctx context.Context, admin *models.Admin) (*TokenPair, error) {
@@ -118,11 +137,23 @@ func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (*TokenP
 	}
 
 	storedAdminID, err := s.rdb.Get(ctx, refreshKey(claims.ID)).Result()
-	if errors.Is(err, redis.Nil) || storedAdminID != claims.AdminID {
+	if errors.Is(err, redis.Nil) {
+		// jti tidak ada di store aktif: token ini sudah pernah dirotasi
+		// (dipakai sebelumnya) atau memang tidak pernah valid. Kita tidak
+		// bisa membedakan keduanya dari Redis saja, jadi sebagai tindakan
+		// defensif terhadap refresh-token-reuse (token dicuri lalu dipakai
+		// setelah pemilik asli sudah rotasi), kita revoke SEMUA sesi refresh
+		// milik admin tersebut supaya token curian langsung tidak berguna.
+		s.revokeAllRefreshSessions(ctx, claims.AdminID)
 		return nil, ErrInvalidRefreshToken
 	}
 	if err != nil {
 		return nil, err
+	}
+	if storedAdminID != claims.AdminID {
+		// Ketidakcocokan admin id vs jti: sinyal kuat token dipalsukan/disalahgunakan.
+		s.revokeAllRefreshSessions(ctx, claims.AdminID)
+		return nil, ErrInvalidRefreshToken
 	}
 
 	admin, err := s.admins.GetByID(ctx, claims.AdminID)
@@ -207,14 +238,20 @@ func (s *AuthService) ChangePassword(ctx context.Context, claims *utils.Claims, 
 	return nil
 }
 
-func (s *AuthService) revokeAllSessions(ctx context.Context, claims *utils.Claims) {
-	jtis, err := s.rdb.SMembers(ctx, refreshSetKey(claims.AdminID)).Result()
+// revokeAllRefreshSessions mencabut seluruh refresh token milik satu admin
+// (dipakai baik untuk ChangePassword maupun untuk deteksi reuse token saat Refresh).
+func (s *AuthService) revokeAllRefreshSessions(ctx context.Context, adminID string) {
+	jtis, err := s.rdb.SMembers(ctx, refreshSetKey(adminID)).Result()
 	if err == nil {
 		for _, jti := range jtis {
 			s.rdb.Del(ctx, refreshKey(jti))
 		}
-		s.rdb.Del(ctx, refreshSetKey(claims.AdminID))
+		s.rdb.Del(ctx, refreshSetKey(adminID))
 	}
+}
+
+func (s *AuthService) revokeAllSessions(ctx context.Context, claims *utils.Claims) {
+	s.revokeAllRefreshSessions(ctx, claims.AdminID)
 
 	if claims.ExpiresAt != nil {
 		remaining := time.Until(claims.ExpiresAt.Time)

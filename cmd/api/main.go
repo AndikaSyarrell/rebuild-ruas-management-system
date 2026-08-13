@@ -89,7 +89,7 @@ func main() {
 		RDB:         rdb,
 		AccessRepo:  accessRepo,
 
-		AuthHandler:      handlers.NewAuthHandler(authService, loginThrottle, pwThrottle, mailService, logger, cfg.FrontendBaseURL),
+		AuthHandler:      handlers.NewAuthHandler(authService, loginThrottle, pwThrottle, mailService, logger, cfg.FrontendBaseURL, cfg),
 		RegionHandler:    handlers.NewRegionHandler(regionRepo),
 		DivisionHandler:  handlers.NewDivisionHandler(divisionRepo),
 		UnitHandler:      handlers.NewUnitHandler(unitRepo),

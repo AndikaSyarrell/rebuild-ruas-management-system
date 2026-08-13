@@ -8,6 +8,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"context"
 
+	"rms-backend/internal/config"
 	"rms-backend/internal/dto"
 	"rms-backend/internal/middleware"
 	"rms-backend/internal/service"
@@ -21,10 +22,52 @@ type AuthHandler struct {
 	mail             *service.MailService
 	logger           *service.Logger
 	frontendBaseURL  string
+	cfg              *config.Config
 }
 
-func NewAuthHandler(authService *service.AuthService, throttle *middleware.LoginThrottle, pwChangeThrottle *middleware.PasswordChangeThrottle, mail *service.MailService, logger *service.Logger, frontendBaseURL string) *AuthHandler {
-	return &AuthHandler{authService: authService, throttle: throttle, pwChangeThrottle: pwChangeThrottle, mail: mail, logger: logger, frontendBaseURL: frontendBaseURL}
+func NewAuthHandler(authService *service.AuthService, throttle *middleware.LoginThrottle, pwChangeThrottle *middleware.PasswordChangeThrottle, mail *service.MailService, logger *service.Logger, frontendBaseURL string, cfg *config.Config) *AuthHandler {
+	return &AuthHandler{authService: authService, throttle: throttle, pwChangeThrottle: pwChangeThrottle, mail: mail, logger: logger, frontendBaseURL: frontendBaseURL, cfg: cfg}
+}
+
+// setRefreshCookie menuliskan refresh_token sebagai httpOnly cookie sesuai
+// BACKEND_AUTH_README.md - token tidak pernah keluar lewat body JSON.
+func (h *AuthHandler) setRefreshCookie(w http.ResponseWriter, token string) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     h.cfg.RefreshCookieName,
+		Value:    token,
+		Path:     h.cfg.RefreshCookiePath,
+		Domain:   h.cfg.RefreshCookieDomain,
+		HttpOnly: true,
+		Secure:   h.cfg.RefreshCookieSecure,
+		SameSite: sameSiteFromString(h.cfg.RefreshCookieSameSite),
+		MaxAge:   int(h.authService.RefreshTTL().Seconds()),
+	})
+}
+
+// clearRefreshCookie menghapus cookie refresh_token (dipakai saat logout /
+// saat refresh gagal, supaya browser tidak terus mengirim token yang sudah invalid).
+func (h *AuthHandler) clearRefreshCookie(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     h.cfg.RefreshCookieName,
+		Value:    "",
+		Path:     h.cfg.RefreshCookiePath,
+		Domain:   h.cfg.RefreshCookieDomain,
+		HttpOnly: true,
+		Secure:   h.cfg.RefreshCookieSecure,
+		SameSite: sameSiteFromString(h.cfg.RefreshCookieSameSite),
+		MaxAge:   -1,
+	})
+}
+
+func sameSiteFromString(v string) http.SameSite {
+	switch v {
+	case "Lax":
+		return http.SameSiteLaxMode
+	case "None":
+		return http.SameSiteNoneMode
+	default:
+		return http.SameSiteStrictMode
+	}
 }
 
 // Login godoc
@@ -120,12 +163,15 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		IP: ip, UserAgent: userAgent,
 	})
 
+	// refresh_token TIDAK dimasukkan ke body JSON - hanya keluar lewat
+	// Set-Cookie httpOnly (lihat BACKEND_AUTH_README.md).
+	h.setRefreshCookie(w, pair.RefreshToken)
+
 	resp := dto.LoginResponse{
 		TokenPairResponse: dto.TokenPairResponse{
-			AccessToken:  pair.AccessToken,
-			RefreshToken: pair.RefreshToken,
-			TokenType:    "Bearer",
-			ExpiresIn:    pair.ExpiresIn,
+			AccessToken: pair.AccessToken,
+			TokenType:   "Bearer",
+			ExpiresIn:   pair.ExpiresIn,
 		},
 		Admin: dto.NewAdminResponse(*admin),
 	}
@@ -138,35 +184,38 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	ip := utils.ClientIP(r)
 
-	var req dto.RefreshRequest
-	if err := decodeJSON(r, &req); err != nil {
-		utils.Error(w, http.StatusBadRequest, "Body permintaan tidak valid")
-		return
-	}
-	if err := req.Validate(); err != nil {
-		utils.Error(w, http.StatusBadRequest, err.Error())
+	// refresh_token sekarang dibaca dari httpOnly cookie, bukan body JSON
+	// (lihat BACKEND_AUTH_README.md - endpoint refresh tidak butuh body).
+	cookie, err := r.Cookie(h.cfg.RefreshCookieName)
+	if err != nil || cookie.Value == "" {
+		utils.Error(w, http.StatusUnauthorized, "Sesi tidak ditemukan, silakan login ulang")
 		return
 	}
 
-	pair, err := h.authService.Refresh(ctx, req.RefreshToken)
+	pair, err := h.authService.Refresh(ctx, cookie.Value)
 	if err != nil {
 		h.logger.Log(service.LogEntry{
 			Module: "auth", Action: "token_refresh_failed", Status: service.LogStatusWarning,
 			Message: err.Error(), IP: ip,
 		})
+		// Cookie yang sudah tidak valid (habis rotasi/reuse/expired) dibersihkan
+		// supaya browser tidak terus mengirim token mati.
+		h.clearRefreshCookie(w)
 		utils.Error(w, http.StatusUnauthorized, "Refresh token tidak valid, silakan login ulang")
 		return
 	}
+
+	// Rotasi: cookie lama diganti dengan refresh_token baru.
+	h.setRefreshCookie(w, pair.RefreshToken)
 
 	h.logger.Log(service.LogEntry{
 		Module: "auth", Action: "token_refresh_success", Status: service.LogStatusSuccess, IP: ip,
 	})
 
 	utils.OK(w, "Token berhasil diperbarui", dto.TokenPairResponse{
-		AccessToken:  pair.AccessToken,
-		RefreshToken: pair.RefreshToken,
-		TokenType:    "Bearer",
-		ExpiresIn:    pair.ExpiresIn,
+		AccessToken: pair.AccessToken,
+		TokenType:   "Bearer",
+		ExpiresIn:   pair.ExpiresIn,
 	})
 }
 
@@ -180,17 +229,19 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// refresh_token opsional saat logout - decode manual (bukan decodeJSON)
-	// karena body boleh kosong sepenuhnya, sedangkan decodeJSON dengan
-	// DisallowUnknownFields akan tetap OK untuk body kosong ({}), jadi
-	// tetap aman dipakai di sini.
-	var req dto.RefreshRequest
-	_ = decodeJSON(r, &req) // error diabaikan dengan sengaja - field opsional
+	// refresh_token dibaca dari cookie (opsional - endpoint tetap boleh
+	// dipanggil tanpa cookie, misalnya cookie sudah kedaluwarsa lebih dulu).
+	refreshToken := ""
+	if cookie, err := r.Cookie(h.cfg.RefreshCookieName); err == nil {
+		refreshToken = cookie.Value
+	}
 
-	if err := h.authService.Logout(ctx, claims, req.RefreshToken); err != nil {
+	if err := h.authService.Logout(ctx, claims, refreshToken); err != nil {
 		utils.Error(w, http.StatusInternalServerError, "Gagal logout")
 		return
 	}
+
+	h.clearRefreshCookie(w)
 
 	h.logger.Log(service.LogEntry{
 		UserID: &claims.AdminID, Module: "auth", Action: "logout",

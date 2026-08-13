@@ -28,6 +28,12 @@ type Config struct {
 
 	CORSAllowedOrigins []string
 
+	RefreshCookieName   string
+	RefreshCookiePath   string
+	RefreshCookieDomain string
+	RefreshCookieSecure bool
+	RefreshCookieSameSite string // "Strict", "Lax", atau "None"
+
 	// Throttling
 	LoginMaxAttemptsPerIP    int
 	LoginAttemptsPerIPWindow time.Duration
@@ -70,6 +76,15 @@ func getEnvInt(key string, def int) int {
 	return def
 }
 
+func getEnvBool(key string, def bool) bool {
+	if v := os.Getenv(key); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			return b
+		}
+	}
+	return def
+}
+
 func getEnvDuration(key string, def time.Duration) time.Duration {
 	if v := os.Getenv(key); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
@@ -101,6 +116,12 @@ func Load() *Config {
 		JWTIssuer:        getEnv("JWT_ISSUER", "rms-backend"),
 
 		CORSAllowedOrigins: []string{getEnv("CORS_ORIGIN", "http://localhost:5173")},
+
+		RefreshCookieName:     getEnv("REFRESH_COOKIE_NAME", "refresh_token"),
+		RefreshCookiePath:     getEnv("REFRESH_COOKIE_PATH", "/api/auth"),
+		RefreshCookieDomain:   getEnv("REFRESH_COOKIE_DOMAIN", ""),
+		RefreshCookieSecure:   getEnvBool("REFRESH_COOKIE_SECURE", getEnv("APP_ENV", "development") != "development"),
+		RefreshCookieSameSite: getEnv("REFRESH_COOKIE_SAMESITE", "Strict"),
 
 		LoginMaxAttemptsPerIP:    getEnvInt("LOGIN_MAX_ATTEMPTS_PER_IP", 20),
 		LoginAttemptsPerIPWindow: getEnvDuration("LOGIN_ATTEMPTS_PER_IP_WINDOW", 15*time.Minute),
