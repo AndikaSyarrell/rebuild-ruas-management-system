@@ -2,14 +2,15 @@ package repository
 
 import (
 	"context"
-	"database/sql"
+	// "database/sql"
 
 	"rms-backend/internal/models"
+	"rms-backend/internal/db"
 )
 
-type UnitRepo struct{ db *sql.DB }
+type UnitRepo struct{ db db.Querier }
 
-func NewUnitRepo(db *sql.DB) *UnitRepo { return &UnitRepo{db: db} }
+func NewUnitRepo(db db.Querier) *UnitRepo { return &UnitRepo{db: db} }
 
 func (r *UnitRepo) ListSelect(ctx context.Context) ([]models.Unit, error) {
 	rows, err := r.db.QueryContext(ctx,

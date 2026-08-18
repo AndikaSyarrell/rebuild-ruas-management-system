@@ -6,11 +6,12 @@ import (
 
 	"rms-backend/internal/models"
 	"rms-backend/internal/utils"
+	"rms-backend/internal/db"
 )
 
-type AdminRepo struct{ db *sql.DB }
+type AdminRepo struct{ db db.Querier }
 
-func NewAdminRepo(db *sql.DB) *AdminRepo { return &AdminRepo{db: db} }
+func NewAdminRepo(db db.Querier) *AdminRepo { return &AdminRepo{db: db} }
 
 const adminSelectWithJoins = `
 	SELECT a.admin_id, a.admin_ref_region, a.admin_ref_role, a.admin_token, a.admin_reset_code,

@@ -5,11 +5,12 @@ import (
 	"database/sql"
 
 	"rms-backend/internal/models"
+	"rms-backend/internal/db"
 )
 
-type AccessRepo struct{ db *sql.DB }
+type AccessRepo struct{ db db.Querier }
 
-func NewAccessRepo(db *sql.DB) *AccessRepo { return &AccessRepo{db: db} }
+func NewAccessRepo(db db.Querier) *AccessRepo { return &AccessRepo{db: db} }
 
 // HasAccess mengimplementasikan middleware.AccessChecker. Menggantikan query PHP
 // yang JOIN ke AT_Access (nama tabel lama) dengan T_Role_Access yang sudah ternormalisasi

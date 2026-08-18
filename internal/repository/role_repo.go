@@ -2,14 +2,15 @@ package repository
 
 import (
 	"context"
-	"database/sql"
+	// "database/sql"
 
 	"rms-backend/internal/models"
+	"rms-backend/internal/db"
 )
 
-type RoleRepo struct{ db *sql.DB }
+type RoleRepo struct{ db db.Querier }
 
-func NewRoleRepo(db *sql.DB) *RoleRepo { return &RoleRepo{db: db} }
+func NewRoleRepo(db db.Querier) *RoleRepo { return &RoleRepo{db: db} }
 
 func (r *RoleRepo) ListPaged(ctx context.Context, page, perPage int) ([]models.Role, int, error) {
 	var total int

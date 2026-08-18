@@ -2,14 +2,15 @@ package repository
 
 import (
 	"context"
-	"database/sql"
+	// "database/sql"
 
 	"rms-backend/internal/models"
+	"rms-backend/internal/db"
 )
 
-type DocumentRepo struct{ db *sql.DB }
+type DocumentRepo struct{ db db.Querier }
 
-func NewDocumentRepo(db *sql.DB) *DocumentRepo { return &DocumentRepo{db: db} }
+func NewDocumentRepo(db db.Querier) *DocumentRepo { return &DocumentRepo{db: db} }
 
 func (r *DocumentRepo) ListByPO(ctx context.Context, poID string) ([]models.PODocument, error) {
 	rows, err := r.db.QueryContext(ctx, `

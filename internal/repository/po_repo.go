@@ -7,11 +7,12 @@ import (
 	"strings"
 
 	"rms-backend/internal/models"
+	"rms-backend/internal/db"
 )
 
-type PORepo struct{ db *sql.DB }
+type PORepo struct{ db db.Querier }
 
-func NewPORepo(db *sql.DB) *PORepo { return &PORepo{db: db} }
+func NewPORepo(db db.Querier) *PORepo { return &PORepo{db: db} }
 
 func (r *PORepo) OrderNumExists(ctx context.Context, orderNum string) (bool, error) {
 	var dummy int
@@ -558,7 +559,7 @@ func (r *PORepo) ReportBarsByRegion(ctx context.Context, startDate, endDate, sta
 		args = append(args, startDate, endDate)
 	}
 
-	query := `SELECT rg.region_id, rg.region_title, COALESCE(SUM(po.po_total), 0) AS total_amount
+	query := `SELECT rg.region_id, COALESCE(rg.region_title, '') AS region_title, COALESCE(SUM(po.po_total), 0) AS total_amount
 			  FROM T_Po po LEFT JOIN T_Region rg ON rg.region_id = po.po_ref_region
 			  WHERE ` + strings.Join(conds, " AND ") + `
 			  GROUP BY po.po_ref_region ORDER BY rg.region_title ASC`
@@ -570,13 +571,13 @@ func (r *PORepo) ReportBarsByRegion(ctx context.Context, startDate, endDate, sta
 
 	var out []map[string]interface{}
 	for rows.Next() {
-		var regionID int
+		var regionID sql.NullInt64
 		var title string
 		var total float64
 		if err := rows.Scan(&regionID, &title, &total); err != nil {
 			return nil, err
 		}
-		out = append(out, map[string]interface{}{"region_id": regionID, "region_title": title, "total_amount": total})
+		out = append(out, map[string]interface{}{"region_id": regionID.Int64, "region_title": title, "total_amount": total})
 	}
 	return out, rows.Err()
 }
@@ -589,7 +590,7 @@ func (r *PORepo) StatByRegion(ctx context.Context, picID string) ([]map[string]i
 		args = append(args, picID)
 	}
 
-	query := `SELECT rg.region_id, rg.region_title, COUNT(pr.po_id) AS total_po,
+	query := `SELECT rg.region_id, COALESCE(rg.region_title, '') AS region_title, COUNT(pr.po_id) AS total_po,
 			  SUM(CASE WHEN pr.po_status='open' THEN 1 ELSE 0 END),
 			  SUM(CASE WHEN pr.po_status='prepared' THEN 1 ELSE 0 END),
 			  SUM(CASE WHEN pr.po_status='progress' THEN 1 ELSE 0 END),

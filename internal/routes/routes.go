@@ -19,7 +19,8 @@ import (
 )
 
 type Dependencies struct {
-	Cfg *config.Config
+	Cfg		*config.Config
+	Logger	*service.Logger
 
 	DB		  	*sql.DB
 	JWTManager  *utils.JWTManager
@@ -138,6 +139,7 @@ func New(d *Dependencies) http.Handler {
 
 	r.Route("/api", func(api chi.Router) {
 		api.Use(auth)
+		api.Use(middleware.RequestLogger(d.Logger))
 
 		// --- Master data: Region ---
 		api.Route("/regions", func(rt chi.Router) {

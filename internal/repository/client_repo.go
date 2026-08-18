@@ -5,11 +5,12 @@ import (
 	"database/sql"
 
 	"rms-backend/internal/models"
+	"rms-backend/internal/db"
 )
 
-type ClientRepo struct{ db *sql.DB }
+type ClientRepo struct{ db db.Querier }
 
-func NewClientRepo(db *sql.DB) *ClientRepo { return &ClientRepo{db: db} }
+func NewClientRepo(db db.Querier) *ClientRepo { return &ClientRepo{db: db} }
 
 const clientSelectWithJoin = `
 	SELECT c.client_id, c.client_ref_region, c.client_name, c.client_phone, c.client_email,

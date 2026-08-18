@@ -2,14 +2,15 @@ package repository
 
 import (
 	"context"
-	"database/sql"
+	// "database/sql"
 
 	"rms-backend/internal/models"
+	"rms-backend/internal/db"
 )
 
-type RegionRepo struct{ db *sql.DB }
+type RegionRepo struct{ db db.Querier }
 
-func NewRegionRepo(db *sql.DB) *RegionRepo { return &RegionRepo{db: db} }
+func NewRegionRepo(db db.Querier) *RegionRepo { return &RegionRepo{db: db} }
 
 func (r *RegionRepo) List(ctx context.Context, keyword string) ([]models.Region, error) {
 	query := `SELECT region_id, region_title, region_create_date, region_modify_date FROM T_Region

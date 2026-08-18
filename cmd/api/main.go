@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"log/slog"
 	"net/http"
 	"os/signal"
 	"syscall"
@@ -39,6 +40,8 @@ func main() {
 	}
 	defer sqlDB.Close()
 
+	loggingDB := db.NewLoggingDB(sqlDB, slog.Default())
+
 	rdb := redis.NewClient(&redis.Options{
 		Addr:     cfg.RedisAddr,
 		Password: cfg.RedisPass,
@@ -57,17 +60,17 @@ func main() {
 	})
 
 	// --- Repositories ---
-	regionRepo := repository.NewRegionRepo(sqlDB)
-	divisionRepo := repository.NewDivisionRepo(sqlDB)
-	unitRepo := repository.NewUnitRepo(sqlDB)
-	ppnRepo := repository.NewPpnRepo(sqlDB)
-	roleRepo := repository.NewRoleRepo(sqlDB)
-	accessRepo := repository.NewAccessRepo(sqlDB)
-	adminRepo := repository.NewAdminRepo(sqlDB)
-	clientRepo := repository.NewClientRepo(sqlDB)
-	poRepo := repository.NewPORepo(sqlDB)
-	activityRepo := repository.NewActivityRepo(sqlDB)
-	documentRepo := repository.NewDocumentRepo(sqlDB)
+	regionRepo := repository.NewRegionRepo(loggingDB)
+	divisionRepo := repository.NewDivisionRepo(loggingDB)
+	unitRepo := repository.NewUnitRepo(loggingDB)
+	ppnRepo := repository.NewPpnRepo(loggingDB)
+	roleRepo := repository.NewRoleRepo(loggingDB)
+	accessRepo := repository.NewAccessRepo(loggingDB)
+	adminRepo := repository.NewAdminRepo(loggingDB)
+	clientRepo := repository.NewClientRepo(loggingDB)
+	poRepo := repository.NewPORepo(loggingDB)
+	activityRepo := repository.NewActivityRepo(loggingDB)
+	documentRepo := repository.NewDocumentRepo(loggingDB)
 
 	// --- Services ---
 	authService := service.NewAuthService(adminRepo, jwtManager, rdb)
@@ -83,6 +86,7 @@ func main() {
 	// --- Handlers ---
 	deps := &routes.Dependencies{
 		Cfg:         cfg,
+		Logger:      logger,
 		DB:          sqlDB,
 		JWTManager:  jwtManager,
 		AuthService: authService,
@@ -102,7 +106,7 @@ func main() {
 		ActivityHandler:  handlers.NewActivityHandler(activityRepo),
 		DocumentHandler:  handlers.NewDocumentHandler(documentRepo, poRepo, activityRepo, "./storage/uploads"),
 		DashboardHandler: handlers.NewDashboardHandler(poRepo),
-		ReportHandler:    handlers.NewReportHandler(poRepo),
+		ReportHandler:    handlers.NewReportHandler(poRepo, logger),
 	}
 
 	handler := routes.New(deps)

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"time"
+	"log/slog"
 
 	_ "github.com/go-sql-driver/mysql"
 )
@@ -37,4 +38,12 @@ func New(cfg Config) (*sql.DB, error) {
 	}
 
 	return conn, nil
+}
+
+func NewWithLogging(cfg Config, logger *slog.Logger) (*LoggingDB, error) {
+	conn, err := New(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return NewLoggingDB(conn, logger), nil
 }

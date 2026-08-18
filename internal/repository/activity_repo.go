@@ -2,14 +2,15 @@ package repository
 
 import (
 	"context"
-	"database/sql"
+	// "database/sql"
 
 	"rms-backend/internal/models"
+	"rms-backend/internal/db"
 )
 
-type ActivityRepo struct{ db *sql.DB }
+type ActivityRepo struct{ db db.Querier }
 
-func NewActivityRepo(db *sql.DB) *ActivityRepo { return &ActivityRepo{db: db} }
+func NewActivityRepo(db db.Querier) *ActivityRepo { return &ActivityRepo{db: db} }
 
 // ListByPO mengambil seluruh histori aktivitas sebuah PO, terurut terbaru dahulu
 // (menggantikan PHP yang mengelompokkan per-tanggal dengan 1+N query - di sini cukup 1 query).

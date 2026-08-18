@@ -2,14 +2,15 @@ package repository
 
 import (
 	"context"
-	"database/sql"
+	// "database/sql"
 
 	"rms-backend/internal/models"
+	"rms-backend/internal/db"
 )
 
-type DivisionRepo struct{ db *sql.DB }
+type DivisionRepo struct{ db db.Querier }
 
-func NewDivisionRepo(db *sql.DB) *DivisionRepo { return &DivisionRepo{db: db} }
+func NewDivisionRepo(db db.Querier) *DivisionRepo { return &DivisionRepo{db: db} }
 
 func (r *DivisionRepo) ListSelect(ctx context.Context) ([]models.Division, error) {
 	rows, err := r.db.QueryContext(ctx,

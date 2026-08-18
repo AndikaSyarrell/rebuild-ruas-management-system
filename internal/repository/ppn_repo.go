@@ -2,14 +2,15 @@ package repository
 
 import (
 	"context"
-	"database/sql"
+	// "database/sql"
 
 	"rms-backend/internal/models"
+	"rms-backend/internal/db"
 )
 
-type PpnRepo struct{ db *sql.DB }
+type PpnRepo struct{ db db.Querier }
 
-func NewPpnRepo(db *sql.DB) *PpnRepo { return &PpnRepo{db: db} }
+func NewPpnRepo(db db.Querier) *PpnRepo { return &PpnRepo{db: db} }
 
 // List mengembalikan seluruh baris PPN (biasanya hanya beberapa - histori tarif).
 func (r *PpnRepo) List(ctx context.Context) ([]models.Ppn, error) {
