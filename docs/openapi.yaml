@@ -1754,17 +1754,70 @@ paths:
   # =========================================================
   # REPORT
   # =========================================================
+  /api/reports/years:
+    get:
+      tags: [Report]
+      summary: Daftar tahun yang memiliki data PO
+      description: >
+        Butuh access_slug: `view_report_table`.
+        Dipakai untuk mengisi dropdown filter tahun di halaman chart/bars -
+        hanya mengembalikan tahun yang benar-benar punya data PO (bukan range
+        tahun statis), terurut dari yang paling baru.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          years:
+                            type: array
+                            items: { type: integer }
+                            example: [2026, 2025, 2024]
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
   /api/reports/chart:
     get:
       tags: [Report]
       summary: Data chart jumlah PO per tanggal
-      description: "Butuh access_slug: `view_report_table`"
+      description: >
+        Butuh access_slug: `view_report_table`.
+
+
+        **Prioritas filter tanggal:**
+        1. Jika `start_date` DAN `end_date` sama-sama diisi → filter memakai
+           rentang tanggal tersebut apa adanya (inklusif), parameter `year`
+           diabaikan untuk filtering (tetap boleh dikirim, hanya dicatat di
+           response).
+        2. Jika `year` diisi (dan salah satu/kedua `start_date`/`end_date`
+           kosong) → filter memakai 1 tahun kalender penuh dari `year`
+           tersebut.
+        3. Jika tidak ada parameter tanggal sama sekali → default ke tahun
+           PO paling baru (lihat `GET /api/reports/years` untuk daftar
+           pilihannya).
+
+
+        Mengirim hanya salah satu dari `start_date`/`end_date` (tanpa
+        pasangannya) akan ditolak dengan `400`.
       parameters:
+        - name: year
+          in: query
+          description: Filter 1 tahun kalender penuh. Diabaikan jika start_date & end_date diisi lengkap.
+          schema: { type: integer, example: 2026 }
         - name: start_date
           in: query
+          description: Wajib diisi bersamaan dengan end_date.
           schema: { type: string, format: date }
         - name: end_date
           in: query
+          description: Wajib diisi bersamaan dengan start_date.
           schema: { type: string, format: date }
         - name: region
           in: query
@@ -1786,12 +1839,38 @@ paths:
                   - type: object
                     properties:
                       data:
-                        type: array
-                        items:
-                          type: object
-                          properties:
-                            date: { type: string, format: date }
-                            total: { type: integer }
+                        type: object
+                        properties:
+                          year:
+                            type: integer
+                            description: Tahun yang benar-benar dipakai untuk filter. Bernilai 0 jika filter memakai start_date/end_date (bukan year).
+                            example: 2026
+                          start_date:
+                            type: string
+                            format: date
+                            description: Kosong jika filter memakai year (bukan date-scope eksplisit).
+                          end_date:
+                            type: string
+                            format: date
+                          data:
+                            type: array
+                            items:
+                              type: object
+                              properties:
+                                date: { type: string, format: date }
+                                total: { type: integer }
+        "400":
+          description: start_date/end_date tidak lengkap (hanya salah satu yang diisi)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    example:
+                      success: false
+                      message: "start_date dan end_date harus diisi bersamaan"
+                      data: null
         "403":
           $ref: "#/components/responses/Forbidden"
 
@@ -1799,13 +1878,23 @@ paths:
     get:
       tags: [Report]
       summary: Data grafik total nilai PO per region
-      description: "Butuh access_slug: `view_report_table`"
+      description: >
+        Butuh access_slug: `view_report_table`.
+        Aturan prioritas filter tanggal (`year` vs `start_date`/`end_date`)
+        sama persis seperti `GET /api/reports/chart` - lihat deskripsi di
+        endpoint tersebut.
       parameters:
+        - name: year
+          in: query
+          description: Filter 1 tahun kalender penuh. Diabaikan jika start_date & end_date diisi lengkap.
+          schema: { type: integer, example: 2026 }
         - name: start_date
           in: query
+          description: Wajib diisi bersamaan dengan end_date.
           schema: { type: string, format: date }
         - name: end_date
           in: query
+          description: Wajib diisi bersamaan dengan start_date.
           schema: { type: string, format: date }
         - name: status
           in: query
@@ -1821,13 +1910,42 @@ paths:
                   - type: object
                     properties:
                       data:
-                        type: array
-                        items:
-                          type: object
-                          properties:
-                            region_id: { type: integer }
-                            region_title: { type: string }
-                            total_amount: { type: number, format: double }
+                        type: object
+                        properties:
+                          year:
+                            type: integer
+                            description: Tahun yang benar-benar dipakai untuk filter. Bernilai 0 jika filter memakai start_date/end_date (bukan year).
+                            example: 2026
+                          start_date:
+                            type: string
+                            format: date
+                          end_date:
+                            type: string
+                            format: date
+                          data:
+                            type: array
+                            items:
+                              type: object
+                              properties:
+                                region_id:
+                                  type: integer
+                                  description: 0 jika PO tidak lagi terhubung ke region manapun (region sudah terhapus).
+                                region_title:
+                                  type: string
+                                  description: String kosong jika region_id 0 (lihat catatan di atas).
+                                total_amount: { type: number, format: double }
+        "400":
+          description: start_date/end_date tidak lengkap (hanya salah satu yang diisi)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    example:
+                      success: false
+                      message: "start_date dan end_date harus diisi bersamaan"
+                      data: null
         "403":
           $ref: "#/components/responses/Forbidden"
 
@@ -1835,7 +1953,11 @@ paths:
     get:
       tags: [Report]
       summary: Statistik PO per region (breakdown per status)
-      description: "Butuh access_slug: `view_report_table`"
+      description: >
+        Butuh access_slug: `view_report_table`.
+        Endpoint ini TIDAK mendukung filter tahun/tanggal - selalu
+        mengagregasi seluruh data PO (opsional dibatasi per PIC lewat
+        `acsg_pic`).
       parameters:
         - name: acsg_pic
           in: query
