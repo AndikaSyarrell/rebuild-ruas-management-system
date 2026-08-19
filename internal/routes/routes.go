@@ -265,6 +265,7 @@ func New(d *Dependencies) http.Handler {
 
 		api.Route("/reports", func(rt chi.Router) {
 			rt.Use(requireAccess("view_report_table"))
+			rt.Get("/years", d.ReportHandler.Years)
 			rt.Get("/chart", d.ReportHandler.Chart)
 			rt.Get("/bars", d.ReportHandler.Bars)
 			rt.Get("/stats", d.ReportHandler.Stats)

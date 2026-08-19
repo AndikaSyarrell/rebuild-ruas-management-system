@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 
 	"rms-backend/internal/models"
 	"rms-backend/internal/db"
@@ -500,7 +501,52 @@ func (r *PORepo) DeleteItem(ctx context.Context, itemID int) error {
 
 // --- Reporting ---
 
-func (r *PORepo) ReportChart(ctx context.Context, startDate, endDate string, regionID int, picID, status string) ([]map[string]interface{}, error) {
+func yearRange(year int) (start, end string) {
+	return fmt.Sprintf("%04d-01-01", year), fmt.Sprintf("%04d-01-01", year+1)
+}
+
+func (r *PORepo) ListYears(ctx context.Context) ([]int, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT DISTINCT YEAR(po_date) AS y FROM T_Po WHERE po_date IS NOT NULL ORDER BY y DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []int{}
+	for rows.Next() {
+		var y int
+		if err := rows.Scan(&y); err != nil {
+			return nil, err
+		}
+		out = append(out, y)
+	}
+	return out, rows.Err()
+}
+
+func (r *PORepo) LatestYear(ctx context.Context) (int, error) {
+	var year sql.NullInt64
+	if err := r.db.QueryRowContext(ctx, `SELECT YEAR(MAX(po_date)) FROM T_Po`).Scan(&year); err != nil {
+		return 0, err
+	}
+	if !year.Valid {
+		return time.Now().Year(), nil
+	}
+	return int(year.Int64), nil
+}
+
+func resolveDateRange(year int, startDate, endDate string) (start, end string, ok bool) {
+	if startDate != "" && endDate != "" {
+		return startDate, endDate, true
+	}
+	if year != 0 {
+		s, e := yearRange(year)
+		return s, e, true
+	}
+	return "", "", false
+}
+
+func (r *PORepo) ReportChart(ctx context.Context, year int, startDate, endDate string, regionID int, picID, status string) ([]map[string]interface{}, error) {
 	var conds []string
 	conds = append(conds, "po_id != ''")
 	var args []interface{}
@@ -519,9 +565,16 @@ func (r *PORepo) ReportChart(ctx context.Context, startDate, endDate string, reg
 		conds = append(conds, "po_ref_pic = ?")
 		args = append(args, picID)
 	}
-	if startDate != "" && endDate != "" {
-		conds = append(conds, "po_date BETWEEN ? AND ?")
-		args = append(args, startDate, endDate)
+	if start, end, ok := resolveDateRange(year, startDate, endDate); ok {
+		if startDate != "" && endDate != "" {
+			// mode date-scope eksplisit: batas akhir inklusif seperti perilaku lama.
+			conds = append(conds, "po_date BETWEEN ? AND ?")
+			args = append(args, start, end)
+		} else {
+			// mode year: half-open range supaya tetap sargable (lihat yearRange).
+			conds = append(conds, "po_date >= ? AND po_date < ?")
+			args = append(args, start, end)
+		}
 	}
 
 	query := `SELECT DATE_FORMAT(po_date, '%Y-%m-%d') AS d, COUNT(po_id) AS total
@@ -545,7 +598,7 @@ func (r *PORepo) ReportChart(ctx context.Context, startDate, endDate string, reg
 	return out, rows.Err()
 }
 
-func (r *PORepo) ReportBarsByRegion(ctx context.Context, startDate, endDate, status string) ([]map[string]interface{}, error) {
+func (r *PORepo) ReportBarsByRegion(ctx context.Context, year int, startDate, endDate string, status string) ([]map[string]interface{}, error) {
 	conds := []string{"po_id != ''"}
 	var args []interface{}
 	if status != "" && status != "all" {
@@ -554,9 +607,14 @@ func (r *PORepo) ReportBarsByRegion(ctx context.Context, startDate, endDate, sta
 	} else {
 		conds = append(conds, "po_status != 'cancel'")
 	}
-	if startDate != "" && endDate != "" {
-		conds = append(conds, "po_date BETWEEN ? AND ?")
-		args = append(args, startDate, endDate)
+	if start, end, ok := resolveDateRange(year, startDate, endDate); ok {
+		if startDate != "" && endDate != "" {
+			conds = append(conds, "po_date BETWEEN ? AND ?")
+			args = append(args, start, end)
+		} else {
+			conds = append(conds, "po_date >= ? AND po_date < ?")
+			args = append(args, start, end)
+		}
 	}
 
 	query := `SELECT rg.region_id, COALESCE(rg.region_title, '') AS region_title, COALESCE(SUM(po.po_total), 0) AS total_amount
