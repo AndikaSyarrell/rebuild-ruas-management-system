@@ -126,6 +126,7 @@ pipeline {
                             docker rm -f ${APP_NAME}-${DEPLOY_ENV}-${TARGET_COLOR} 2>/dev/null || true
                             docker run -d \
                                 --name ${APP_NAME}-${DEPLOY_ENV}-${TARGET_COLOR} \
+                                -v /var/www/Rebuild-RMS/storage:/app/storage \
                                 --network ${DOCKER_NETWORK} \
                                 --restart unless-stopped \
                                 --env-file ${STATE_DIR}/${TARGET_COLOR}.env \
