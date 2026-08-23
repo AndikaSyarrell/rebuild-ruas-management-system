@@ -2372,6 +2372,29 @@
           "response": []
         },
         {
+          "name": "Download/Preview PO Document",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/po/{{po_id}}/documents/{{doc_id}}/download",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "po",
+                "{{po_id}}",
+                "documents",
+                "{{doc_id}}",
+                "download"
+              ]
+            },
+            "description": "Stream isi file dokumen (inline). Content-Type mengikuti tipe file asli (pdf/doc/docx/jpg/jpeg/png/gif) dan Content-Disposition di-set 'inline' supaya browser boleh preview langsung. Klik 'Send and Download' di Postman untuk menyimpan filenya ke disk, atau lihat langsung di tab Response > Preview kalau formatnya didukung browser (PDF/gambar)."
+          },
+          "response": []
+        },
+        {
           "name": "Delete PO Document",
           "request": {
             "method": "DELETE",

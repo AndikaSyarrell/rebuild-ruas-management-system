@@ -3,9 +3,11 @@ package handlers
 import (
 	"fmt"
 	"io"
+	"log"          
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"      
 	"strings"
 	"time"
 	"mime"
@@ -177,10 +179,27 @@ func (h *DocumentHandler) Download(w http.ResponseWriter, r *http.Request) {
 	fullPath := filepath.Join(h.uploadDir, "..", doc.File)
 	f, err := os.Open(fullPath)
 	if err != nil {
+		log.Printf("download dokumen id=%d gagal buka file path=%s: %v", docID, fullPath, err)
 		utils.Error(w, http.StatusNotFound, "File dokumen tidak ditemukan di server")
 		return
 	}
 	defer f.Close()
+
+	// Stat DULU sebelum mulai streaming - kalau file kosong/berubah di
+	// tengah jalan, ini titik terakhir kita masih bisa kirim status error
+	// yang benar ke client (setelah io.Copy mulai, status 200 sudah terlanjur
+	// terkirim dan tidak bisa diubah lagi).
+	fi, err := f.Stat()
+	if err != nil {
+		log.Printf("download dokumen id=%d gagal stat file path=%s: %v", docID, fullPath, err)
+		utils.Error(w, http.StatusInternalServerError, "Gagal membaca informasi file")
+		return
+	}
+	if fi.Size() == 0 {
+		log.Printf("download dokumen id=%d file kosong (0 bytes) path=%s", docID, fullPath)
+		utils.Error(w, http.StatusInternalServerError, "File dokumen kosong atau rusak di server")
+		return
+	}
 
 	ext := strings.ToLower(filepath.Ext(doc.File))
 	contentType := mime.TypeByExtension(ext)
@@ -188,9 +207,25 @@ func (h *DocumentHandler) Download(w http.ResponseWriter, r *http.Request) {
 		contentType = "application/octet-stream"
 	}
 	w.Header().Set("Content-Type", contentType)
-	// "inline" (bukan "attachment") - browser boleh preview langsung (PDF/gambar
-	// tampil di tab), frontend yang menentukan apakah dibuka tab baru (preview)
-	// atau dipaksa save-as (download) lewat atribut <a download> di sisi client.
+	w.Header().Set("Content-Length", strconv.FormatInt(fi.Size(), 10))
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`inline; filename="%s"`, doc.Title))
-	io.Copy(w, f)
+
+	written, err := io.Copy(w, f)
+	if err != nil {
+		// Header 200 sudah terkirim di titik ini, jadi client tetap akan
+		// menerima response yang "sukses" tapi body-nya terpotong. Kita
+		// tidak bisa mengubah status HTTP lagi di sini, tapi setidaknya
+		// error-nya sekarang tercatat di log server, bukan menghilang begitu
+		// saja seperti sebelumnya.
+		log.Printf("download dokumen id=%d gagal streaming setelah %d/%d bytes: %v",
+			docID, written, fi.Size(), err)
+		return
+	}
+	if written != fi.Size() {
+		// Defensif: io.Copy tidak error tapi jumlah byte yang terkirim tidak
+		// sama dengan ukuran file asli - kondisi langka tapi kalau terjadi,
+		// ini bukti kuat ada yang memotong response di tengah jalan.
+		log.Printf("download dokumen id=%d MISMATCH jumlah byte: terkirim=%d, seharusnya=%d",
+			docID, written, fi.Size())
+	}
 }
