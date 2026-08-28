@@ -831,3 +831,56 @@ func (r *PORepo) ListDashboardOpen(ctx context.Context, regionID int, picID stri
 	}
 	return out, rows.Err()
 }
+
+func (r *PORepo) CountByFilter(ctx context.Context, f ListFilter) (map[string]int, error) {
+	var conds []string
+	var args []interface{}
+
+	if f.Keyword != "" {
+		conds = append(conds, `(po.po_id LIKE ? OR po.po_order_num LIKE ? OR cl.client_name LIKE ? OR po.po_subclient LIKE ?
+			OR EXISTS (SELECT 1 FROM T_Po_Item it WHERE it.item_ref_po = po.po_id AND it.item_product LIKE ?))`)
+		like := "%" + f.Keyword + "%"
+		args = append(args, like, like, like, like, like)
+	}
+	if f.StartDate != "" && f.EndDate != "" {
+		conds = append(conds, "po.po_date BETWEEN ? AND ?")
+		args = append(args, f.StartDate, f.EndDate)
+	}
+	if f.RegionID != 0 {
+		conds = append(conds, "po.po_ref_region = ?")
+		args = append(args, f.RegionID)
+	}
+	if f.PicID != "" {
+		conds = append(conds, "po.po_ref_pic = ?")
+		args = append(args, f.PicID)
+	}
+
+	whereClause := ""
+	if len(conds) > 0 {
+		whereClause = "WHERE " + strings.Join(conds, " AND ")
+	}
+
+	query := `
+		SELECT po.po_status, COUNT(DISTINCT po.po_id)
+		FROM T_Po po
+		LEFT JOIN T_Client cl ON po.po_ref_client = cl.client_id
+		` + whereClause + `
+		GROUP BY po.po_status`
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := map[string]int{"open": 0, "progress": 0, "prepared": 0, "complete": 0, "cancel": 0}
+	for rows.Next() {
+		var status string
+		var count int
+		if err := rows.Scan(&status, &count); err != nil {
+			return nil, err
+		}
+		out[status] = count
+	}
+	return out, rows.Err()
+}

@@ -111,14 +111,19 @@ func (h *POHandler) Export(w http.ResponseWriter, r *http.Request) {
 // GET /api/po/total?...
 func (h *POHandler) Total(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	regionID := utils.AtoiDefault(q.Get("region"), 0)
-	picID := ""
+	filter := repository.ListFilter{
+		Keyword:   q.Get("keyword"),
+		StartDate: utils.ParseDateParam(q.Get("start_date")),
+		EndDate:   utils.ParseDateParam(q.Get("end_date")),
+		RegionID:  utils.AtoiDefault(q.Get("region"), 0),
+	}
 	if q.Get("acsg_pic") == "1" {
 		if adminID, ok := actorFromContext(r.Context()); ok {
-			picID = adminID
+			filter.PicID = adminID
 		}
 	}
-	counts, err := h.repo.CountByStatus(r.Context(), regionID, picID)
+
+	counts, err := h.repo.CountByFilter(r.Context(), filter)
 	if err != nil {
 		utils.Error(w, http.StatusInternalServerError, "Gagal mengambil ringkasan PO")
 		return
