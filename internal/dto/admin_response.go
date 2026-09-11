@@ -22,6 +22,8 @@ type AdminResponse struct {
 	RoleTitle   string `json:"role_title,omitempty"`
 	RefRegion   int    `json:"admin_ref_region"`
 	RegionTitle string `json:"region_title,omitempty"`
+	RefDivision   *int   `json:"admin_ref_division"`   // BARU
+	DivisionTitle string `json:"division_title,omitempty"` // BARU
 	Img         string `json:"admin_img,omitempty"`
 	ImgThumb    string `json:"admin_img_thmb,omitempty"`
 	CreateDate  string `json:"admin_create_date"`
@@ -47,6 +49,8 @@ func NewAdminResponse(m models.Admin) AdminResponse {
 		RoleTitle:   m.RoleTitle,
 		RefRegion:   m.RefRegion,
 		RegionTitle: m.RegionTitle,
+		RefDivision:   m.RefDivision,
+		DivisionTitle: m.DivisionTitle,
 		Img:         img,
 		ImgThumb:    imgThumb,
 		CreateDate:  m.CreateDate.Format(time.RFC3339),

@@ -38,6 +38,21 @@ tags:
   - name: PO Items
   - name: Activity
   - name: Document
+  - name: Signature
+    description: Tanda tangan digital admin (dipakai untuk prepared/checked/approved by pada PR)
+  - name: Responsible
+    description: Referensi Chart of Accounts (CoA), dipakai sebagai pr_ref_responsible pada modul PR
+  - name: Purchase Request
+    description: >
+      Modul PR (Purchase Request) - alur draft -> submit -> approval
+      berjenjang -> payment. Lihat juga tag "PR Approval", "PR Payment",
+      dan "PR Document".
+  - name: PR Approval
+    description: Keputusan approval berjenjang (approve/reject/request-revision) pada PR
+  - name: PR Payment
+    description: Siklus pembayaran PR setelah berstatus approved
+  - name: PR Document
+    description: Lampiran dokumen pada PR (mis. cost_control, quotation)
   - name: Dashboard
   - name: Report
   - name: Health
@@ -957,6 +972,66 @@ paths:
                         type: array
                         items: { $ref: "#/components/schemas/AdminResponse" }
 
+  /api/admins/me/signature:
+    get:
+      tags: [Signature]
+      summary: Tanda tangan terdaftar milik admin yang sedang login
+      description: >
+        Mengembalikan tanda tangan TERBARU milik admin (bisa lebih dari satu
+        di histori). Dipakai sebagai syarat sebelum submit PR (prepared by)
+        maupun approve PR.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/SignatureResponse" }
+        "404":
+          description: Admin belum memiliki tanda tangan terdaftar
+    post:
+      tags: [Signature]
+      summary: Unggah tanda tangan baru
+      description: >
+        Multipart/form-data, field `file` (png/jpg/jpeg, maks 5MB, magic
+        number divalidasi) dan `name_pic` (nama yang tercetak di bawah
+        tanda tangan pada dokumen RFP). Setiap upload baru menjadi tanda
+        tangan TERBARU (histori lama tetap tersimpan, tidak ditimpa).
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, name_pic]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                name_pic:
+                  type: string
+      responses:
+        "201":
+          description: Tanda tangan berhasil diunggah
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          signature_id: { type: integer }
+                          file: { type: string }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
   /api/admins/{id}:
     parameters:
       - $ref: "#/components/parameters/IdPathString"
@@ -1724,6 +1799,871 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+
+  # =========================================================
+  # RESPONSIBLE (Chart of Accounts)
+  # =========================================================
+  /api/responsibles:
+    get:
+      tags: [Responsible]
+      summary: List responsible (dengan paginasi & pencarian)
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PerPage"
+        - name: keyword
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - $ref: "#/components/schemas/PaginationMeta"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/ResponsibleResponse" }
+    post:
+      tags: [Responsible]
+      summary: Buat responsible baru
+      description: "Butuh access_slug: `create_responsible`"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ResponsibleRequest" }
+      responses:
+        "201":
+          $ref: "#/components/responses/Created"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Kode CoA sudah terdaftar
+
+  /api/responsibles/select:
+    get:
+      tags: [Responsible]
+      summary: List responsible aktif untuk dropdown pembuatan/edit PR
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/ResponsibleResponse" }
+
+  /api/responsibles/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPathInt"
+    get:
+      tags: [Responsible]
+      summary: Detail responsible
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/ResponsibleResponse" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [Responsible]
+      summary: Ubah responsible
+      description: "Butuh access_slug: `edit_responsible`"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ResponsibleRequest" }
+      responses:
+        "200":
+          $ref: "#/components/responses/OK"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Kode CoA sudah terdaftar
+    delete:
+      tags: [Responsible]
+      summary: Hapus responsible
+      description: >
+        Butuh access_slug: `delete_responsible`. Akan gagal (FK constraint)
+        bila responsible ini masih dipakai oleh purchase request manapun.
+      responses:
+        "200":
+          $ref: "#/components/responses/OK"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          description: Gagal dihapus (kemungkinan masih dipakai PR lain)
+
+  /api/responsibles/{id}/activate:
+    parameters:
+      - $ref: "#/components/parameters/IdPathInt"
+    post:
+      tags: [Responsible]
+      summary: Aktifkan responsible
+      description: "Butuh access_slug: `change_stat_responsible`"
+      responses:
+        "200":
+          $ref: "#/components/responses/OK"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/responsibles/{id}/deactivate:
+    parameters:
+      - $ref: "#/components/parameters/IdPathInt"
+    post:
+      tags: [Responsible]
+      summary: Nonaktifkan responsible
+      description: >
+        Butuh access_slug: `change_stat_responsible`. Responsible nonaktif
+        tidak muncul lagi di `/api/responsibles/select`, namun PR lama yang
+        sudah memakainya tidak terpengaruh.
+      responses:
+        "200":
+          $ref: "#/components/responses/OK"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  # =========================================================
+  # PURCHASE REQUEST (PR)
+  # =========================================================
+  /api/pr:
+    get:
+      tags: [Purchase Request]
+      summary: List purchase request
+      description: >
+        Jika query `status` diisi, mengembalikan SELURUH baris berstatus
+        tsb tanpa paginasi (`paged: false`). Jika kosong, mengembalikan
+        hasil paginasi standar.
+      parameters:
+        - name: status
+          in: query
+          description: "draft | submitted | approved | rejected | revision | completed | cancelled"
+          schema: { type: string }
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PerPage"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - $ref: "#/components/schemas/PaginationMeta"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/PRResponse" }
+    post:
+      tags: [Purchase Request]
+      summary: Buat purchase request baru (status awal draft)
+      description: >
+        Butuh access_slug: `create_pr`. Admin pembuat WAJIB sudah terhubung
+        ke divisi (untuk penomoran RFP) - lihat `admin_ref_division`.
+        `payments` opsional: baris pembayaran yang sudah direncanakan di
+        muka, tersimpan berstatus `draft` dan baru aktif (`pending`) setelah
+        PR ini disetujui penuh.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreatePRRequest" }
+      responses:
+        "201":
+          description: Purchase request berhasil dibuat
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          pr_id: { type: integer }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          description: Referensi PR sebelumnya bukan milik admin ini
+        "409":
+          description: >
+            Admin belum terhubung ke divisi manapun, atau referensi PR
+            sebelumnya tidak valid (tidak ditemukan/beda responsible/siklus)
+
+  /api/pr/my-approvals:
+    get:
+      tags: [PR Approval]
+      summary: Daftar baris approval yang menunggu keputusan admin ini
+      description: >
+        Hanya baris level 1, atau level > 1 yang level sebelumnya (round
+        sama) sudah `approved` - approval yang belum "gilirannya" tidak
+        ikut muncul.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/PRApprovalResponse" }
+
+  /api/pr/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdPathInt"
+    get:
+      tags: [Purchase Request]
+      summary: Detail purchase request
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/PRResponse" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [Purchase Request]
+      summary: Ubah purchase request
+      description: >
+        Butuh access_slug: `edit_pr`. Hanya requester pemilik yang boleh
+        mengubah, dan hanya selama status `draft` atau `revision`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdatePRRequest" }
+      responses:
+        "200":
+          $ref: "#/components/responses/OK"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          description: Bukan pemilik PR, atau referensi PR sebelumnya bukan milik admin ini
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: >
+            PR sudah tidak berstatus draft/revision, atau referensi PR
+            sebelumnya tidak valid
+
+  /api/pr/{id}/export:
+    parameters:
+      - $ref: "#/components/parameters/IdPathInt"
+    get:
+      tags: [Purchase Request]
+      summary: Export dokumen RFP (.docx)
+      description: >
+        Butuh access_slug: `export_pr`. Menghasilkan dokumen Request For
+        Payment lengkap dengan tanda tangan prepared/checked/approved by
+        (bila tersedia) sebagai file `.docx` siap unduh.
+      responses:
+        "200":
+          description: File docx
+          content:
+            application/vnd.openxmlformats-officedocument.wordprocessingml.document:
+              schema: { type: string, format: binary }
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Purchase request tidak ditemukan
+
+  /api/pr/{id}/cancel:
+    parameters:
+      - $ref: "#/components/parameters/IdPathInt"
+    post:
+      tags: [Purchase Request]
+      summary: Batalkan purchase request
+      description: >
+        Hanya requester pemilik yang boleh membatalkan, dan hanya selama
+        status `draft`, `revision`, atau `submitted`. PR yang sudah
+        `approved`/`completed`/`rejected`/`cancelled` dianggap final.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CancelPRRequest" }
+      responses:
+        "200":
+          $ref: "#/components/responses/OK"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          description: Bukan pemilik PR
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: PR sudah pada status final dan tidak dapat dibatalkan
+
+  /api/pr/{id}/history:
+    parameters:
+      - $ref: "#/components/parameters/IdPathInt"
+    get:
+      tags: [Purchase Request]
+      summary: Riwayat perubahan status PR
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/PRHistoryResponse" }
+
+  /api/pr/{id}/approvals:
+    parameters:
+      - $ref: "#/components/parameters/IdPathInt"
+    get:
+      tags: [PR Approval]
+      summary: Daftar seluruh baris approval PR (lintas round)
+      description: Terurut round terbaru dahulu lalu level ascending.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/PRApprovalResponse" }
+
+  /api/pr/{id}/submit:
+    parameters:
+      - $ref: "#/components/parameters/IdPathInt"
+    post:
+      tags: [Purchase Request]
+      summary: Submit PR untuk approval
+      description: >
+        Butuh access_slug: `submit_pr`. Mensyaratkan requester punya tanda
+        tangan terdaftar (dipakai sebagai "prepared by"); approver level 1
+        wajib disertakan; PR dengan `requested_amount` di atas Rp
+        50.000.000 wajib sudah melampirkan dokumen bertipe `cost_control`.
+        Hanya berlaku dari status `draft` atau `revision`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SubmitPRRequest" }
+      responses:
+        "200":
+          $ref: "#/components/responses/OK"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          description: PR bukan milik admin yang login
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: >
+            PR tidak eligible untuk submit, level approval sudah pernah
+            dibuat untuk round ini, requester belum punya tanda tangan
+            terdaftar, atau dokumen cost_control wajib belum dilampirkan
+
+  /api/pr/{id}/priority:
+    parameters:
+      - $ref: "#/components/parameters/IdPathInt"
+    post:
+      tags: [Purchase Request]
+      summary: Atur priority PR
+      description: >
+        Butuh access_slug: `set_pr_priority`. Hanya approver level 1 pada
+        round approval TERBARU PR ini yang boleh mengatur priority, dan
+        tidak dapat diatur selama PR masih berstatus `draft`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SetPriorityRequest" }
+      responses:
+        "200":
+          $ref: "#/components/responses/OK"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          description: Bukan approver level 1 pada round terbaru
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: >
+            Priority tidak dapat diatur selama draft, atau baris approval
+            level 1 belum tersedia (PR belum pernah disubmit)
+
+  /api/pr/{id}/amounts:
+    parameters:
+      - $ref: "#/components/parameters/IdPathInt"
+    post:
+      tags: [Purchase Request]
+      summary: Perbarui nominal PO amount & HPP (margin dihitung otomatis)
+      description: >
+        Butuh access_slug: `update_pr_amounts`. Hanya `po_amount` dan `hpp`
+        yang disimpan; `pr_margin` (= po_amount - hpp) dan
+        `pr_margin_percentage` (= margin / po_amount * 100, aman terhadap
+        pembagian nol) SELALU dihitung ulang saat response, tidak pernah
+        disimpan sebagai kolom terpisah.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdatePRAmountsRequest" }
+      responses:
+        "200":
+          description: Nominal berhasil diperbarui
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/PRResponse" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/pr/{id}/comments:
+    parameters:
+      - $ref: "#/components/parameters/IdPathInt"
+    get:
+      tags: [Purchase Request]
+      summary: Daftar komentar PR
+      description: >
+        Hanya bisa diakses admin yang terkait dengan PR ini (requester,
+        approver di round manapun, atau finance yang mencatat/mengonfirmasi
+        pembayarannya).
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/PRCommentResponse" }
+        "403":
+          description: Admin tidak terkait dengan PR ini
+    post:
+      tags: [Purchase Request]
+      summary: Tambah komentar pada PR
+      description: >
+        Naratif bebas, TIDAK memicu perubahan status PR (berbeda dari
+        catatan revisi formal pada approval_notes). Sama seperti list,
+        hanya admin yang terkait dengan PR ini yang boleh menambah komentar.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PRCommentRequest" }
+      responses:
+        "201":
+          $ref: "#/components/responses/Created"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          description: Admin tidak terkait dengan PR ini
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/pr/approvals/{approvalId}/approve:
+    parameters:
+      - name: approvalId
+        in: path
+        required: true
+        schema: { type: integer }
+    post:
+      tags: [PR Approval]
+      summary: Setujui baris approval
+      description: >
+        Butuh access_slug: `approve_pr`. Mensyaratkan sequential (level N
+        baru bisa diputuskan setelah level N-1 pada round yang sama
+        `approved`) dan approver punya tanda tangan terdaftar. Jika ini
+        adalah level tertinggi pada round tsb, PR otomatis berpindah ke
+        status `approved` dan payment draft (jika ada) diaktifkan.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DecidePRApprovalRequest" }
+      responses:
+        "200":
+          $ref: "#/components/responses/OK"
+        "403":
+          description: Baris approval ini bukan milik admin yang login
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: >
+            Approval level sebelumnya belum disetujui, PR sudah tidak
+            berstatus submitted, atau approver belum punya tanda tangan
+            terdaftar
+
+  /api/pr/approvals/{approvalId}/reject:
+    parameters:
+      - name: approvalId
+        in: path
+        required: true
+        schema: { type: integer }
+    post:
+      tags: [PR Approval]
+      summary: Tolak baris approval
+      description: >
+        Butuh access_slug: `approve_pr`. PR langsung berpindah ke status
+        `rejected` begitu satu level manapun menolak.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DecidePRApprovalRequest" }
+      responses:
+        "200":
+          $ref: "#/components/responses/OK"
+        "403":
+          description: Baris approval ini bukan milik admin yang login
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Approval level sebelumnya belum disetujui, atau PR sudah tidak berstatus submitted
+
+  /api/pr/approvals/{approvalId}/request-revision:
+    parameters:
+      - name: approvalId
+        in: path
+        required: true
+        schema: { type: integer }
+    post:
+      tags: [PR Approval]
+      summary: Minta revisi PR
+      description: >
+        Butuh access_slug: `request_revision_pr`. Hanya approver level 1
+        atau 2 yang berwenang meminta revisi (level 3/director tidak
+        boleh). PR berpindah ke status `revision`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DecidePRApprovalRequest" }
+      responses:
+        "200":
+          $ref: "#/components/responses/OK"
+        "403":
+          description: >
+            Baris approval ini bukan milik admin yang login, atau level ini
+            (director) tidak berwenang meminta revisi
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Approval level sebelumnya belum disetujui, atau PR sudah tidak berstatus submitted
+
+  /api/pr/{id}/documents:
+    parameters:
+      - $ref: "#/components/parameters/IdPathInt"
+    get:
+      tags: [PR Document]
+      summary: Daftar dokumen lampiran PR
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/PRDocumentResponse" }
+    post:
+      tags: [PR Document]
+      summary: Unggah dokumen lampiran PR
+      description: >
+        Multipart/form-data. Hanya requester pemilik PR yang boleh
+        melampirkan dokumen. Field `document_type` salah satu dari:
+        `cost_control`, `quotation`, `invoice`, `contract`, `other`
+        (default `other`). Field `file`: pdf/doc/docx/jpg/jpeg/png, maks
+        10MB, magic number divalidasi terhadap tipe yang diklaim.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                document_type:
+                  type: string
+                  enum: [cost_control, quotation, invoice, contract, other]
+      responses:
+        "201":
+          description: Dokumen berhasil diunggah
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          document_id: { type: integer }
+                          file: { type: string }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          description: Bukan requester pemilik PR
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/pr/{id}/documents/{docId}:
+    parameters:
+      - $ref: "#/components/parameters/IdPathInt"
+      - name: docId
+        in: path
+        required: true
+        schema: { type: integer }
+    delete:
+      tags: [PR Document]
+      summary: Hapus dokumen lampiran PR
+      description: Hanya admin yang mengunggah dokumen tsb yang boleh menghapusnya.
+      responses:
+        "200":
+          $ref: "#/components/responses/OK"
+        "403":
+          description: Bukan pengunggah dokumen ini
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/pr/{id}/documents/{docId}/download:
+    parameters:
+      - $ref: "#/components/parameters/IdPathInt"
+      - name: docId
+        in: path
+        required: true
+        schema: { type: integer }
+    get:
+      tags: [PR Document]
+      summary: Unduh file dokumen lampiran PR
+      description: >
+        Mengalirkan file mentah dari storage dengan
+        `Content-Disposition: attachment`, sehingga browser client selalu
+        menawarkan simpan-sebagai (dipakai untuk aksi "download" pada UI).
+      responses:
+        "200":
+          description: File dokumen
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "404":
+          description: Dokumen tidak ditemukan (metadata maupun file fisik di server)
+        "500":
+          description: File dokumen kosong/rusak di server, atau gagal dibaca informasinya
+
+  /api/pr/{id}/documents/{docId}/preview:
+    parameters:
+      - $ref: "#/components/parameters/IdPathInt"
+      - name: docId
+        in: path
+        required: true
+        schema: { type: integer }
+    get:
+      tags: [PR Document]
+      summary: Pratinjau file dokumen lampiran PR
+      description: >
+        Sama seperti download, tapi mengirim
+        `Content-Disposition: inline` (dengan `Content-Type` sesuai
+        ekstensi file - pdf/jpg/jpeg/png) sehingga file dapat ditampilkan
+        langsung di dalam browser/tab, bukan diunduh sebagai attachment.
+      responses:
+        "200":
+          description: File dokumen (ditampilkan inline)
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+            image/jpeg:
+              schema: { type: string, format: binary }
+            image/png:
+              schema: { type: string, format: binary }
+        "404":
+          description: Dokumen tidak ditemukan (metadata maupun file fisik di server)
+        "500":
+          description: File dokumen kosong/rusak di server, atau gagal dibaca informasinya
+
+  /api/pr/{id}/payments:
+    parameters:
+      - $ref: "#/components/parameters/IdPathInt"
+    get:
+      tags: [PR Payment]
+      summary: Daftar pembayaran PR ini
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/PRPaymentResponse" }
+    post:
+      tags: [PR Payment]
+      summary: Catat tahap pembayaran baru
+      description: >
+        Butuh access_slug: `create_pr_payment`. PR harus sudah berstatus
+        `approved` sebelum pembayarannya dapat dicatat.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreatePRPaymentRequest" }
+      responses:
+        "201":
+          description: Pembayaran berhasil dicatat
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          payment_id: { type: integer }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: PR harus berstatus approved sebelum dapat dicatat pembayarannya
+
+  /api/pr/{id}/payment-chain:
+    parameters:
+      - $ref: "#/components/parameters/IdPathInt"
+    get:
+      tags: [PR Payment]
+      summary: Riwayat pembayaran lintas rantai PR (PR referensi berantai)
+      description: >
+        Menyusuri `pr_ref_previous_pr` mundur (maks 20 tingkat) dan
+        mengembalikan pembayaran tiap tahap dalam rantai tsb, terguna untuk
+        PR lanjutan yang mereferensikan PR-PR sebelumnya (mis. termin).
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/PRPaymentChainStage" }
+
+  /api/pr/payments/{paymentId}/confirm:
+    parameters:
+      - name: paymentId
+        in: path
+        required: true
+        schema: { type: integer }
+    post:
+      tags: [PR Payment]
+      summary: Konfirmasi pembayaran lunas
+      description: >
+        Butuh access_slug: `confirm_pr_payment`. Menerapkan prinsip
+        maker-checker: admin yang mengonfirmasi TIDAK BOLEH sama dengan
+        admin yang mencatat pembayaran ini. Jika seluruh pembayaran PR
+        sudah lunas, PR otomatis berpindah ke status `completed`.
+      responses:
+        "200":
+          $ref: "#/components/responses/OK"
+        "403":
+          description: Admin yang mencatat tidak boleh merangkap mengonfirmasi pembayaran yang sama
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Pembayaran ini masih draft, sudah lunas, atau sudah dibatalkan sebelumnya
+
+  /api/pr/payments/{paymentId}/cancel:
+    parameters:
+      - name: paymentId
+        in: path
+        required: true
+        schema: { type: integer }
+    post:
+      tags: [PR Payment]
+      summary: Batalkan tahap pembayaran
+      description: >
+        Butuh access_slug: `confirm_pr_payment`. Pembayaran yang sudah
+        `paid` tidak dapat dibatalkan lewat jalur ini.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CancelPRPaymentRequest" }
+      responses:
+        "200":
+          $ref: "#/components/responses/OK"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Pembayaran yang sudah lunas atau sudah dibatalkan tidak dapat diproses lagi
 
   # =========================================================
   # DASHBOARD
@@ -2599,3 +3539,272 @@ components:
           type: array
           items: { type: string }
           example: ["create_po", "edit_po", "delete_client"]
+
+    # --- signature ---
+    SignatureResponse:
+      type: object
+      properties:
+        signature_id: { type: integer }
+        signature_file: { type: string }
+        signature_name_pic: { type: string }
+
+    # --- responsible (Chart of Accounts) ---
+    ResponsibleRequest:
+      type: object
+      required: [name, coa_code]
+      properties:
+        name: { type: string }
+        coa_code: { type: string, description: "Disimpan huruf besar" }
+        status:
+          type: string
+          enum: [active, inactive, ""]
+          description: Opsional saat create, default "active"
+
+    ResponsibleResponse:
+      type: object
+      properties:
+        responsible_id: { type: integer }
+        responsible_name: { type: string }
+        responsible_coa_code: { type: string }
+        responsible_status: { type: string, enum: [active, inactive] }
+        responsible_create_date: { type: string, format: date-time }
+
+    # --- purchase request: request payloads ---
+    CreatePRPaymentRequest:
+      type: object
+      required: [stage, amount, type]
+      properties:
+        stage:
+          type: string
+          example: "down_payment"
+          description: "mis. down_payment/full_payment/final_payment"
+        amount: { type: number, format: double, minimum: 0.01 }
+        type:
+          type: string
+          example: "transfer"
+          description: "mis. transfer/cash/giro"
+        bank: { type: string }
+        bank_account_no: { type: string }
+        bank_account_name: { type: string }
+        priority_date: { type: string, format: date }
+
+    CreatePRRequest:
+      type: object
+      required: [ref_responsible, description_item]
+      properties:
+        ref_responsible: { type: integer }
+        description_item: { type: string }
+        sub_client: { type: string }
+        requested_amount: { type: number, format: double, minimum: 0 }
+        po_amount: { type: number, format: double, minimum: 0 }
+        hpp: { type: number, format: double, minimum: 0 }
+        qout_no: { type: string }
+        target_invoice_date: { type: string, format: date }
+        ref_previous_pr:
+          type: integer
+          nullable: true
+          description: >
+            Opsional. PR referensi (mis. termin lanjutan) - harus milik
+            admin yang sama, responsible (CoA) yang sama, dan tidak boleh
+            membentuk siklus.
+        payments:
+          type: array
+          items: { $ref: "#/components/schemas/CreatePRPaymentRequest" }
+
+    UpdatePRRequest:
+      type: object
+      required: [ref_responsible, description_item]
+      properties:
+        ref_responsible: { type: integer }
+        description_item: { type: string }
+        sub_client: { type: string }
+        requested_amount: { type: number, format: double, minimum: 0 }
+        qout_no: { type: string }
+        target_invoice_date: { type: string, format: date }
+        ref_previous_pr: { type: integer, nullable: true }
+
+    ApproverAssignmentRequest:
+      type: object
+      required: [level, type, admin_id]
+      properties:
+        level: { type: integer, minimum: 1, maximum: 3 }
+        type:
+          type: string
+          example: "manager"
+          description: "mis. manager/finance/director"
+        admin_id: { type: string }
+
+    SubmitPRRequest:
+      type: object
+      required: [approvers]
+      properties:
+        approvers:
+          type: array
+          minItems: 1
+          maxItems: 3
+          description: >
+            Level tidak boleh duplikat dan approver level 1 wajib
+            disertakan.
+          items: { $ref: "#/components/schemas/ApproverAssignmentRequest" }
+
+    DecidePRApprovalRequest:
+      type: object
+      properties:
+        notes: { type: string }
+
+    SetPriorityRequest:
+      type: object
+      properties:
+        priority:
+          type: string
+          enum: [low, medium, high, urgent, ""]
+          description: Kosongkan untuk unset priority
+
+    PRCommentRequest:
+      type: object
+      required: [text]
+      properties:
+        text: { type: string }
+        type:
+          type: string
+          example: "general"
+          description: "mis. general/revision_request/internal_note"
+
+    UpdatePRAmountsRequest:
+      type: object
+      properties:
+        po_amount: { type: number, format: double, minimum: 0 }
+        hpp: { type: number, format: double, minimum: 0 }
+
+    CancelPRPaymentRequest:
+      type: object
+      required: [notes]
+      properties:
+        notes: { type: string }
+
+    CancelPRRequest:
+      type: object
+      required: [notes]
+      properties:
+        notes: { type: string }
+
+    # --- purchase request: response payloads ---
+    PRResponse:
+      type: object
+      properties:
+        pr_id: { type: integer }
+        pr_ref_admin: { type: string }
+        admin_name: { type: string }
+        pr_ref_responsible: { type: integer }
+        responsible_name: { type: string }
+        pr_rfp_no: { type: string }
+        pr_description_item: { type: string }
+        pr_subclient: { type: string }
+        pr_requested_amount: { type: number, format: double }
+        pr_qout_no: { type: string }
+        pr_po_amount: { type: number, format: double }
+        pr_hpp: { type: number, format: double }
+        pr_target_invoice_date: { type: string, format: date }
+        pr_status:
+          type: string
+          enum: [draft, submitted, approved, rejected, revision, completed, cancelled]
+        pr_priority: { type: string, enum: [low, medium, high, urgent] }
+        pr_priority_ref_admin: { type: string }
+        pr_priority_date: { type: string, format: date-time }
+        pr_create_date: { type: string, format: date-time }
+        pr_modify_date: { type: string, format: date-time }
+        pr_ref_previous_pr: { type: integer, nullable: true }
+        previous_rfp_no: { type: string }
+        pr_margin:
+          type: number
+          format: double
+          description: "Turunan (BR-CALC-01) = pr_po_amount - pr_hpp, tidak disimpan sebagai kolom"
+        pr_margin_percentage:
+          type: number
+          format: double
+          description: "Turunan = pr_margin / pr_po_amount * 100, aman terhadap pembagian nol"
+
+    PRApprovalResponse:
+      type: object
+      properties:
+        approval_id: { type: integer }
+        approval_ref_admin: { type: string }
+        admin_name: { type: string }
+        approval_ref_pr: { type: integer }
+        approval_level: { type: integer }
+        approval_type: { type: string }
+        approval_status:
+          type: string
+          enum: [pending, approved, rejected, revision_requested]
+        approval_round: { type: integer }
+        approval_notes: { type: string }
+        approval_create_date: { type: string, format: date-time }
+
+    PRHistoryResponse:
+      type: object
+      properties:
+        history_id: { type: integer }
+        history_ref_admin: { type: string }
+        admin_name: { type: string }
+        history_ref_pr: { type: integer }
+        history_from_status: { type: string }
+        history_to_status: { type: string }
+        history_notes: { type: string }
+        history_create_date: { type: string, format: date-time }
+
+    PRCommentResponse:
+      type: object
+      properties:
+        comment_id: { type: integer }
+        comment_ref_admin: { type: string }
+        admin_name: { type: string }
+        comment_ref_pr: { type: integer }
+        comment_text: { type: string }
+        comment_type: { type: string }
+        comment_create_date: { type: string, format: date-time }
+
+    PRDocumentResponse:
+      type: object
+      properties:
+        document_id: { type: integer }
+        document_type:
+          type: string
+          enum: [cost_control, quotation, invoice, contract, other]
+        document_file_name: { type: string }
+        document_file_path: { type: string }
+        document_ref_admin: { type: string }
+        admin_name: { type: string }
+        document_ref_pr: { type: integer }
+        document_create_date: { type: string, format: date-time }
+
+    PRPaymentResponse:
+      type: object
+      properties:
+        payment_id: { type: integer }
+        payment_ref_pr: { type: integer }
+        payment_ref_admin_input: { type: string }
+        admin_input_name: { type: string }
+        payment_stage: { type: string }
+        payment_amount: { type: number, format: double }
+        payment_type: { type: string }
+        payment_bank: { type: string }
+        payment_bank_account_no: { type: string }
+        payment_bank_account_name: { type: string }
+        payment_priority_date: { type: string, format: date }
+        payment_status:
+          type: string
+          enum: [draft, pending, paid, cancelled]
+        payment_paid_date: { type: string, format: date-time }
+        payment_ref_admin_paid: { type: string }
+        admin_paid_name: { type: string }
+        payment_create_date: { type: string, format: date-time }
+
+    PRPaymentChainStage:
+      type: object
+      properties:
+        pr_id: { type: integer }
+        rfp_no: { type: string }
+        pr_status: { type: string }
+        payments:
+          type: array
+          items: { $ref: "#/components/schemas/PRPaymentResponse" }

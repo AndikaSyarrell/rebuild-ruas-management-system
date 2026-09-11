@@ -14,7 +14,8 @@ func NewDivisionRepo(db db.Querier) *DivisionRepo { return &DivisionRepo{db: db}
 
 func (r *DivisionRepo) ListSelect(ctx context.Context) ([]models.Division, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT division_id, division_title, created_at, updated_at FROM T_Division ORDER BY division_title ASC`)
+		`SELECT division_id, division_title, division_code, created_at, updated_at
+		 FROM T_Division ORDER BY division_title ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -22,7 +23,7 @@ func (r *DivisionRepo) ListSelect(ctx context.Context) ([]models.Division, error
 	var out []models.Division
 	for rows.Next() {
 		var v models.Division
-		if err := rows.Scan(&v.ID, &v.Title, &v.CreatedAt, &v.UpdatedAt); err != nil {
+		if err := rows.Scan(&v.ID, &v.Title, &v.Code, &v.CreatedAt, &v.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, v)
@@ -37,7 +38,7 @@ func (r *DivisionRepo) ListPaged(ctx context.Context, page, perPage int) ([]mode
 	}
 	offset := (page - 1) * perPage
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT division_id, division_title, created_at, updated_at FROM T_Division
+		`SELECT division_id, division_title, division_code, created_at, updated_at FROM T_Division
 		 ORDER BY created_at DESC LIMIT ? OFFSET ?`, perPage, offset)
 	if err != nil {
 		return nil, 0, err
@@ -46,7 +47,7 @@ func (r *DivisionRepo) ListPaged(ctx context.Context, page, perPage int) ([]mode
 	var out []models.Division
 	for rows.Next() {
 		var v models.Division
-		if err := rows.Scan(&v.ID, &v.Title, &v.CreatedAt, &v.UpdatedAt); err != nil {
+		if err := rows.Scan(&v.ID, &v.Title, &v.Code, &v.CreatedAt, &v.UpdatedAt); err != nil {
 			return nil, 0, err
 		}
 		out = append(out, v)
@@ -57,24 +58,27 @@ func (r *DivisionRepo) ListPaged(ctx context.Context, page, perPage int) ([]mode
 func (r *DivisionRepo) GetByID(ctx context.Context, id int) (*models.Division, error) {
 	var v models.Division
 	err := r.db.QueryRowContext(ctx,
-		`SELECT division_id, division_title, created_at, updated_at FROM T_Division WHERE division_id = ?`, id).
-		Scan(&v.ID, &v.Title, &v.CreatedAt, &v.UpdatedAt)
+		`SELECT division_id, division_title, division_code, created_at, updated_at
+		 FROM T_Division WHERE division_id = ?`, id).
+		Scan(&v.ID, &v.Title, &v.Code, &v.CreatedAt, &v.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
 	return &v, nil
 }
 
-func (r *DivisionRepo) Create(ctx context.Context, title string) (int64, error) {
-	res, err := r.db.ExecContext(ctx, `INSERT INTO T_Division (division_title) VALUES (?)`, title)
+func (r *DivisionRepo) Create(ctx context.Context, title, code string) (int64, error) {
+	res, err := r.db.ExecContext(ctx,
+		`INSERT INTO T_Division (division_title, division_code) VALUES (?, ?)`, title, code)
 	if err != nil {
 		return 0, err
 	}
 	return res.LastInsertId()
 }
 
-func (r *DivisionRepo) Update(ctx context.Context, id int, title string) error {
-	_, err := r.db.ExecContext(ctx, `UPDATE T_Division SET division_title = ? WHERE division_id = ?`, title, id)
+func (r *DivisionRepo) Update(ctx context.Context, id int, title, code string) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE T_Division SET division_title = ?, division_code = ? WHERE division_id = ?`, title, code, id)
 	return err
 }
 

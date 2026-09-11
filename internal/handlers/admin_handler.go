@@ -97,7 +97,7 @@ func (h *AdminHandler) Create(w http.ResponseWriter, r *http.Request) {
 	id := utils.GenerateSequentialID("ADM")
 	token := utils.RandomHex(20)
 
-	if err := h.repo.Create(r.Context(), id, req.Email, req.Name, int(req.RegionID), req.RoleIDPtr(), token, req.Pic, req.PicClient); err != nil {
+	if err := h.repo.Create(r.Context(), id, req.Email, req.Name, int(req.RegionID), req.RoleIDPtr(), req.DivisionIDPtr(), token, req.Pic, req.PicClient); err != nil {
 		utils.Error(w, http.StatusInternalServerError, "Gagal membuat admin")
 		return
 	}
@@ -148,7 +148,7 @@ func (h *AdminHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := h.repo.Update(r.Context(), id, req.RoleIDPtr(), req.Email, req.Name, req.Pic, req.PicClient, int(req.RegionID)); err != nil {
+	if err := h.repo.Update(r.Context(), id, req.RoleIDPtr(), req.DivisionIDPtr(), req.Email, req.Name, req.Pic, req.PicClient, int(req.RegionID)); err != nil {
 		utils.Error(w, http.StatusInternalServerError, "Gagal memperbarui admin")
 		return
 	}

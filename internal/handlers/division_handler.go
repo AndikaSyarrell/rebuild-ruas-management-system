@@ -51,7 +51,7 @@ func (h *DivisionHandler) Detail(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *DivisionHandler) Create(w http.ResponseWriter, r *http.Request) {
-	var req dto.TitleRequest
+	var req dto.DivisionRequest
 	if err := decodeJSON(r, &req); err != nil {
 		utils.Error(w, http.StatusBadRequest, "Body permintaan tidak valid")
 		return
@@ -61,7 +61,7 @@ func (h *DivisionHandler) Create(w http.ResponseWriter, r *http.Request) {
 		utils.Error(w, http.StatusBadRequest, "Judul divisi wajib diisi")
 		return
 	}
-	id, err := h.repo.Create(r.Context(), req.Title)
+	id, err := h.repo.Create(r.Context(), req.Title, req.Code)
 	if err != nil {
 		utils.Error(w, http.StatusInternalServerError, "Gagal membuat divisi")
 		return
@@ -74,7 +74,7 @@ func (h *DivisionHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var req dto.TitleRequest
+	var req dto.DivisionRequest
 	if err := decodeJSON(r, &req); err != nil {
 		utils.Error(w, http.StatusBadRequest, "Body permintaan tidak valid")
 		return
@@ -84,7 +84,7 @@ func (h *DivisionHandler) Update(w http.ResponseWriter, r *http.Request) {
 		utils.Error(w, http.StatusBadRequest, "Judul divisi wajib diisi")
 		return
 	}
-	if err := h.repo.Update(r.Context(), id, req.Title); err != nil {
+	if err := h.repo.Update(r.Context(), id, req.Title, req.Code); err != nil {
 		utils.Error(w, http.StatusInternalServerError, "Gagal memperbarui divisi")
 		return
 	}

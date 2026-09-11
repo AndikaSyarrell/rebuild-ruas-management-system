@@ -14,23 +14,25 @@ type AdminRepo struct{ db db.Querier }
 func NewAdminRepo(db db.Querier) *AdminRepo { return &AdminRepo{db: db} }
 
 const adminSelectWithJoins = `
-	SELECT a.admin_id, a.admin_ref_region, a.admin_ref_role, a.admin_token, a.admin_reset_code,
+	SELECT a.admin_id, a.admin_ref_region, a.admin_ref_role, a.admin_ref_division, a.admin_token, a.admin_reset_code,
 	       a.admin_email, a.admin_name, a.admin_password, a.admin_active, a.admin_pic, a.admin_pic_client,
 	       a.admin_img, a.admin_img_thmb, a.admin_create_date, a.admin_modify_date,
-	       COALESCE(ro.role_title, ''), COALESCE(ro.role_slug, ''), COALESCE(rg.region_title, '')
+	       COALESCE(ro.role_title, ''), COALESCE(ro.role_slug, ''), COALESCE(rg.region_title, ''),
+	       COALESCE(dv.division_title, ''), COALESCE(dv.division_code, '')
 	FROM T_Admin a
 	LEFT JOIN T_Role ro ON a.admin_ref_role = ro.role_id
 	LEFT JOIN T_Region rg ON a.admin_ref_region = rg.region_id
+	LEFT JOIN T_Division dv ON a.admin_ref_division = dv.division_id
 `
 
 func scanAdmin(row interface {
 	Scan(dest ...interface{}) error
 }) (*models.Admin, error) {
 	var v models.Admin
-	err := row.Scan(&v.ID, &v.RefRegion, &v.RefRole, &v.Token, &v.ResetCode,
+	err := row.Scan(&v.ID, &v.RefRegion, &v.RefRole, &v.RefDivision, &v.Token, &v.ResetCode,
 		&v.Email, &v.Name, &v.Password, &v.Active, &v.Pic, &v.PicClient,
 		&v.Img, &v.ImgThumb, &v.CreateDate, &v.ModifyDate,
-		&v.RoleTitle, &v.RoleSlug, &v.RegionTitle)
+		&v.RoleTitle, &v.RoleSlug, &v.RegionTitle, &v.DivisionTitle, &v.DivisionCode)
 	if err != nil {
 		return nil, err
 	}
@@ -156,20 +158,21 @@ func (r *AdminRepo) ListByAccessSlug(ctx context.Context, slug string) ([]models
 	return out, rows.Err()
 }
 
-func (r *AdminRepo) Create(ctx context.Context, id, email, name string, regionID int, roleID *int, token string, pic, picClient string) error {
+func (r *AdminRepo) Create(ctx context.Context, id, email, name string, regionID int, roleID *int, divisionID *int, token string, pic, picClient string) error {
 	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO T_Admin (admin_id, admin_email, admin_name, admin_ref_role, admin_token, admin_active,
+		`INSERT INTO T_Admin (admin_id, admin_email, admin_name, admin_ref_role, admin_ref_division, admin_token, admin_active,
 		 admin_pic, admin_pic_client, admin_ref_region, admin_create_date)
-		 VALUES (?, ?, ?, ?, ?, 'inactive', ?, ?, ?, NOW())`,
-		id, email, name, roleID, utils.HashToken(token), pic, picClient, regionID)
+		 VALUES (?, ?, ?, ?, ?, ?, 'inactive', ?, ?, ?, NOW())`,
+		id, email, name, roleID, divisionID, utils.HashToken(token), pic, picClient, regionID)
 	return err
 }
 
-func (r *AdminRepo) Update(ctx context.Context, id string, roleID *int, email, name, pic, picClient string, regionID int) error {
+func (r *AdminRepo) Update(ctx context.Context, id string, roleID *int, divisionID *int, email, name, pic, picClient string, regionID int) error {
 	_, err := r.db.ExecContext(ctx,
-		`UPDATE T_Admin SET admin_email = ?, admin_name = ?, admin_ref_role = ?, admin_pic = ?, admin_pic_client = ?, admin_ref_region = ?
+		`UPDATE T_Admin SET admin_email = ?, admin_name = ?, admin_ref_role = ?, admin_ref_division = ?,
+		 admin_pic = ?, admin_pic_client = ?, admin_ref_region = ?
 		 WHERE admin_id = ?`,
-		email, name, roleID, pic, picClient, regionID, id)
+		email, name, roleID, divisionID, pic, picClient, regionID, id)
 	return err
 }
 

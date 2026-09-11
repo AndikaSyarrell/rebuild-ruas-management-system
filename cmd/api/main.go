@@ -72,8 +72,27 @@ func main() {
 	activityRepo := repository.NewActivityRepo(loggingDB)
 	documentRepo := repository.NewDocumentRepo(loggingDB)
 
+	// PR
+	prRepo := repository.NewPRRepo(loggingDB)
+	prHistoryRepo := repository.NewPRHistoryRepo(loggingDB)
+	prApprovalRepo := repository.NewPRApprovalRepo(loggingDB)
+	adminSignatureRepo := repository.NewAdminSignatureRepo(loggingDB)
+	prPaymentRepo := repository.NewPRPaymentRepo(loggingDB)
+	prCommentRepo := repository.NewPRCommentRepo(loggingDB)
+	prDocumentRepo := repository.NewPRDocumentRepo(loggingDB)
+	prCounterRepo := repository.NewPRCounterRepo(loggingDB)
+	responsibleRepo := repository.NewResponsibleRepo(loggingDB)
+
 	// --- Services ---
 	authService := service.NewAuthService(adminRepo, jwtManager, rdb)
+	prService := service.NewPRService(prRepo, prHistoryRepo, prPaymentRepo, adminSignatureRepo,adminRepo, divisionRepo, prCounterRepo)
+	prPaymentService := service.NewPRPaymentService(prPaymentRepo, prCommentRepo, prService)
+	prApprovalService := service.NewPRApprovalService(prApprovalRepo, prRepo, prService, adminSignatureRepo, prDocumentRepo, prPaymentRepo)
+	prExportService := service.NewPRExportService(
+	prRepo, prApprovalRepo, prPaymentRepo,
+	adminSignatureRepo,
+	"./storage/uploads",
+	)
 	exportService := service.NewExportService(poRepo, service.ExportConfig{
 		CacheDir:     cfg.POExportCacheDir,
 		TemplatePath: cfg.POExportTemplate,
@@ -103,6 +122,12 @@ func main() {
 		AdminHandler:     handlers.NewAdminHandler(adminRepo, mailService, "./storage/uploads", cfg.FrontendBaseURL),
 		ClientHandler:    handlers.NewClientHandler(clientRepo),
 		POHandler:        handlers.NewPOHandler(poRepo, activityRepo, clientRepo, ppnRepo, exportService),
+		PRHandler:        handlers.NewPRHandler(prRepo, prHistoryRepo, prApprovalRepo, prCommentRepo, prService, prApprovalService, prExportService),
+		PRPaymentHandler: handlers.NewPRPaymentHandler(prPaymentRepo, prRepo, prPaymentService),
+		SignatureHandler: handlers.NewSignatureHandler(adminSignatureRepo, "./storage/uploads"),
+
+		PRDocumentHandler: handlers.NewPRDocumentHandler(prDocumentRepo, prRepo, "./storage/uploads"),
+		ResponsibleHandler: handlers.NewResponsibleHandler(responsibleRepo),
 		ActivityHandler:  handlers.NewActivityHandler(activityRepo),
 		DocumentHandler:  handlers.NewDocumentHandler(documentRepo, poRepo, activityRepo, "./storage/uploads"),
 		DashboardHandler: handlers.NewDashboardHandler(poRepo),

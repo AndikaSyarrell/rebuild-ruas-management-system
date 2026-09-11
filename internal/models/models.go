@@ -16,6 +16,7 @@ type Region struct {
 type Division struct {
 	ID        int       `json:"division_id" db:"division_id"`
 	Title     string    `json:"division_title" db:"division_title"`
+	Code      string    `json:"division_code" db:"division_code"`
 	CreatedAt time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
 }
@@ -67,6 +68,7 @@ type Admin struct {
 	ID         string    `json:"admin_id" db:"admin_id"`
 	RefRegion  int       `json:"admin_ref_region" db:"admin_ref_region"`
 	RefRole    *int      `json:"admin_ref_role" db:"admin_ref_role"`
+	RefDivision *int     `json:"admin_ref_division" db:"admin_ref_division"`
 	Token      *string   `json:"-" db:"admin_token"`
 	ResetCode  *string   `json:"-" db:"admin_reset_code"`
 	Email      string    `json:"admin_email" db:"admin_email"`
@@ -84,6 +86,8 @@ type Admin struct {
 	RoleTitle   string `json:"role_title,omitempty" db:"role_title"`
 	RoleSlug    string `json:"role_slug,omitempty" db:"role_slug"`
 	RegionTitle string `json:"region_title,omitempty" db:"region_title"`
+	DivisionTitle string `json:"division_title,omitempty" db:"division_title"`
+	DivisionCode  string `json:"division_code,omitempty" db:"division_code"`
 }
 
 // AdminPublic adalah representasi Admin yang aman ditampilkan ke client (tanpa hash password/token).
@@ -229,4 +233,133 @@ type Paginated[T any] struct {
 	Page      int `json:"page"`
 	PerPage   int `json:"per_page"`
 	NumData   int `json:"num_data"`
+}
+
+// ---------------------------------------------------------------------
+// Purchase Request (PR) module
+// ---------------------------------------------------------------------
+
+type PurchaseRequest struct {
+	ID                int        `json:"pr_id" db:"pr_id"`
+	RefAdmin          string     `json:"pr_ref_admin" db:"pr_ref_admin"`
+	RefResponsible    int        `json:"pr_ref_responsible" db:"pr_ref_responsible"`
+	RfpNo             string     `json:"pr_rfp_no" db:"pr_rfp_no"`
+	DescriptionItem   string     `json:"pr_description_item" db:"pr_description_item"`
+	SubClient         *string    `json:"pr_subclient" db:"pr_subclient"`
+	RequestedAmount   float64    `json:"pr_requested_amount" db:"pr_requested_amount"`
+	QoutNo            *string    `json:"pr_qout_no" db:"pr_qout_no"`
+	PoAmount          float64    `json:"pr_po_amount" db:"pr_po_amount"`
+	Hpp               float64    `json:"pr_hpp" db:"pr_hpp"`
+	TargetInvoiceDate *time.Time `json:"pr_target_invoice_date" db:"pr_target_invoice_date"`
+	Status            string     `json:"pr_status" db:"pr_status"`
+	Priority          *string    `json:"pr_priority" db:"pr_priority"`
+	PriorityRefAdmin  *string    `json:"pr_priority_ref_admin" db:"pr_priority_ref_admin"`   // BARU
+	PriorityDate      *time.Time `json:"pr_priority_date" db:"pr_priority_date"`  
+	CreateDate        time.Time  `json:"pr_create_date" db:"pr_create_date"`
+	ModifyDate        time.Time  `json:"pr_modify_date" db:"pr_modify_date"`
+
+	SignatureRef  *int   `json:"pr_signature_ref" db:"pr_signature_ref"`
+	SignatureFile string `json:"signature_file,omitempty" db:"signature_file"` // hasil JOIN, opsional
+
+	RefPreviousPR *int   `json:"pr_ref_previous_pr" db:"pr_ref_previous_pr"`       // BARU
+	PreviousRfpNo string `json:"previous_rfp_no,omitempty" db:"previous_rfp_no"`  // BARU, hasil JOIN
+
+	Margin           float64 `json:"pr_margin,omitempty" db:"-"`
+	MarginPercentage float64 `json:"pr_margin_percentage,omitempty" db:"-"`
+
+	AdminName       string `json:"admin_name,omitempty" db:"admin_name"`
+	ResponsibleName string `json:"responsible_name,omitempty" db:"responsible_name"`
+}
+
+type AdminSignature struct {
+	ID         int       `json:"signature_id" db:"signature_id"`
+	RefAdmin   string    `json:"signature_ref_admin" db:"signature_ref_admin"`
+	NamePic    string    `json:"signature_name_pic" db:"signature_name_pic"`
+	File       string    `json:"signature_file" db:"signature_file"`
+	CreateDate time.Time `json:"signature_create_date" db:"signature_create_date"`
+	ModifyDate time.Time `json:"signature_modify_date" db:"signature_modify_date"`
+}
+
+type PRApproval struct {
+	ID         int       `json:"approval_id" db:"approval_id"`
+	RefAdmin   string    `json:"approval_ref_admin" db:"approval_ref_admin"`
+	RefPR      int       `json:"approval_ref_pr" db:"approval_ref_pr"`
+	Level      int       `json:"approval_level" db:"approval_level"`
+	Type       string    `json:"approval_type" db:"approval_type"`
+	Status     string    `json:"approval_status" db:"approval_status"`
+	Round      int       `json:"approval_round" db:"approval_round"`
+	Notes      *string   `json:"approval_notes" db:"approval_notes"`
+	CreateDate time.Time `json:"approval_create_date" db:"approval_create_date"`
+
+	// BARU: jejak tanda tangan yang dipakai saat approve (NULL untuk
+	// reject/revision_requested/masih pending).
+	SignatureRef  *int   `json:"approval_signature_ref" db:"approval_signature_ref"`
+	SignatureFile string `json:"signature_file,omitempty" db:"signature_file"`
+
+	AdminName string `json:"admin_name,omitempty" db:"admin_name"`
+}
+
+type PRStatusHistory struct {
+	ID         int       `json:"history_id" db:"history_id"`
+	RefAdmin   string    `json:"history_ref_admin" db:"history_ref_admin"`
+	RefPR      int       `json:"history_ref_pr" db:"history_ref_pr"`
+	FromStatus *string   `json:"history_from_status" db:"history_from_status"`
+	ToStatus   string    `json:"history_to_status" db:"history_to_status"`
+	Notes      *string   `json:"history_notes" db:"history_notes"`
+	CreateDate time.Time `json:"history_create_date" db:"history_create_date"`
+
+	AdminName string `json:"admin_name,omitempty" db:"admin_name"`
+}
+
+type PRDocument struct {
+	ID         int       `json:"document_id" db:"document_id"`
+	Type       string    `json:"document_type" db:"document_type"`
+	FileName   string    `json:"document_file_name" db:"document_file_name"`
+	FilePath   string    `json:"document_file_path" db:"document_file_path"`
+	RefAdmin   string    `json:"document_ref_admin" db:"document_ref_admin"`
+	RefPR      int       `json:"document_ref_pr" db:"document_ref_pr"`
+	CreateDate time.Time `json:"document_create_date" db:"document_create_date"`
+
+	AdminName string `json:"admin_name,omitempty" db:"admin_name"`
+}
+
+type PRComment struct {
+	ID         int       `json:"comment_id" db:"comment_id"`
+	RefAdmin   string    `json:"comment_ref_admin" db:"comment_ref_admin"`
+	RefPR      int       `json:"comment_ref_pr" db:"comment_ref_pr"`
+	Text       string    `json:"comment_text" db:"comment_text"`
+	Type       string    `json:"comment_type" db:"comment_type"`
+	CreateDate time.Time `json:"comment_create_date" db:"comment_create_date"`
+
+	AdminName string `json:"admin_name,omitempty" db:"admin_name"`
+}
+
+type PRPayment struct {
+	ID              int        `json:"payment_id" db:"payment_id"`
+	RefPR           int        `json:"payment_ref_pr" db:"payment_ref_pr"`
+	RefAdminInput   string     `json:"payment_ref_admin_input" db:"payment_ref_admin_input"`
+	Stage           string     `json:"payment_stage" db:"payment_stage"`
+	Amount          float64    `json:"payment_amount" db:"payment_amount"`
+	Type            string     `json:"payment_type" db:"payment_type"`
+	Bank            *string    `json:"payment_bank" db:"payment_bank"`
+	BankAccountNo   *string    `json:"payment_bank_account_no" db:"payment_bank_account_no"`
+	BankAccountName *string    `json:"payment_bank_account_name" db:"payment_bank_account_name"`
+	PriorityDate    *time.Time `json:"payment_priority_date" db:"payment_priority_date"`
+	Status          string     `json:"payment_status" db:"payment_status"`
+	PaidDate        *time.Time `json:"payment_paid_date" db:"payment_paid_date"`
+	RefAdminPaid    *string    `json:"payment_ref_admin_paid" db:"payment_ref_admin_paid"`
+	CreateDate      time.Time  `json:"payment_create_date" db:"payment_create_date"`
+	ModifyDate      time.Time  `json:"payment_modify_date" db:"payment_modify_date"`
+
+	AdminInputName string `json:"admin_input_name,omitempty" db:"admin_input_name"`
+	AdminPaidName  string `json:"admin_paid_name,omitempty" db:"admin_paid_name"`
+}
+
+type Responsible struct {
+	ID         int       `json:"responsible_id" db:"responsible_id"`
+	Name       string    `json:"responsible_name" db:"responsible_name"`
+	CoaCode    string    `json:"responsible_coa_code" db:"responsible_coa_code"`
+	Status     string    `json:"responsible_status" db:"responsible_status"` // active | inactive
+	CreateDate time.Time `json:"responsible_create_date" db:"responsible_create_date"`
+	ModifyDate time.Time `json:"responsible_modify_date" db:"responsible_modify_date"`
 }

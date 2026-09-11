@@ -13,6 +13,7 @@ type CreateAdminRequest struct {
 	Name      string         `json:"username"`
 	RoleID    *utils.FlexInt `json:"role_id"`
 	RegionID  utils.FlexInt  `json:"region_id"`
+	DivisionID *utils.FlexInt `json:"division_id"` // BARU - opsional, boleh nil
 	Pic       string         `json:"pic"`        // "yes" | "no"
 	PicClient string         `json:"pic_client"` // "yes" | "no"
 }
@@ -28,6 +29,14 @@ func (r *CreateAdminRequest) Normalize() {
 	if r.PicClient == "" {
 		r.PicClient = "no"
 	}
+}
+
+func (r CreateAdminRequest) DivisionIDPtr() *int {
+	if r.DivisionID == nil {
+		return nil
+	}
+	v := int(*r.DivisionID)
+	return &v
 }
 
 func (r CreateAdminRequest) Validate() error {
@@ -63,8 +72,17 @@ type UpdateAdminRequest struct {
 	Name      string         `json:"username"`
 	RoleID    *utils.FlexInt `json:"role_id"`
 	RegionID  utils.FlexInt  `json:"region_id"`
+	DivisionID *utils.FlexInt `json:"division_id"` // BARU
 	Pic       string         `json:"pic"`
 	PicClient string         `json:"pic_client"`
+}
+
+func (r UpdateAdminRequest) DivisionIDPtr() *int {
+	if r.DivisionID == nil {
+		return nil
+	}
+	v := int(*r.DivisionID)
+	return &v
 }
 
 func (r *UpdateAdminRequest) Normalize() {

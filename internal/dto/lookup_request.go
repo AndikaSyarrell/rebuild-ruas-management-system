@@ -22,3 +22,23 @@ func (r TitleRequest) Validate() error {
 	}
 	return nil
 }
+
+type DivisionRequest struct {
+	Title string `json:"title"`
+	Code  string `json:"code"`
+}
+
+func (r *DivisionRequest) Normalize() {
+	r.Title = strings.TrimSpace(r.Title)
+	r.Code = strings.ToUpper(strings.TrimSpace(r.Code))
+}
+
+func (r DivisionRequest) Validate() error {
+	if r.Title == "" {
+		return errors.New("judul divisi wajib diisi")
+	}
+	if r.Code == "" {
+		return errors.New("kode divisi wajib diisi")
+	}
+	return nil
+}

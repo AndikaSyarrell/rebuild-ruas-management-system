@@ -39,6 +39,11 @@ type Dependencies struct {
 	AdminHandler     *handlers.AdminHandler
 	ClientHandler    *handlers.ClientHandler
 	POHandler        *handlers.POHandler
+	PRHandler        *handlers.PRHandler
+	PRPaymentHandler *handlers.PRPaymentHandler
+	SignatureHandler *handlers.SignatureHandler
+	ResponsibleHandler *handlers.ResponsibleHandler
+	PRDocumentHandler *handlers.PRDocumentHandler
 	ActivityHandler  *handlers.ActivityHandler
 	DocumentHandler  *handlers.DocumentHandler
 	DashboardHandler *handlers.DashboardHandler
@@ -207,6 +212,8 @@ func New(d *Dependencies) http.Handler {
 			rt.Get("/pic", d.AdminHandler.ListPIC)
 			rt.Get("/pic-client", d.AdminHandler.ListPICClient)
 			rt.Get("/{id}", d.AdminHandler.Detail)
+			rt.Get("/me/signature", d.SignatureHandler.Mine)
+			rt.Post("/me/signature", d.SignatureHandler.Upload)
 			rt.With(requireAccess("create_new_admin")).Post("/", d.AdminHandler.Create)
 			rt.With(requireAccess("edit_other_admin")).Put("/{id}", d.AdminHandler.Update)
 			rt.With(requireAccess("edit_pic")).Post("/{id}/image", d.AdminHandler.UploadImage)
@@ -255,6 +262,54 @@ func New(d *Dependencies) http.Handler {
 			rt.Get("/{id}/documents/{docId}/download", d.DocumentHandler.Download)
 			rt.With(requireAccess("upload_document")).Post("/{id}/documents", d.DocumentHandler.Upload)
 			rt.With(requireAccess("upload_document")).Delete("/{id}/documents/{docId}", d.DocumentHandler.Delete)
+		})
+
+		// --- Purchase Request ---
+		api.Route("/pr", func(rt chi.Router) {
+			rt.Get("/", d.PRHandler.List)
+			rt.Get("/{id}", d.PRHandler.Detail)
+			rt.With(requireAccess("export_pr")).Get("/{id}/export", d.PRHandler.ExportRFP)
+			rt.With(requireAccess("create_pr")).Post("/", d.PRHandler.Create)
+			rt.With(requireAccess("edit_pr")).Put("/{id}", d.PRHandler.Update)
+			rt.Post("/{id}/cancel", d.PRHandler.Cancel)
+			
+			rt.Get("/{id}/documents", d.PRDocumentHandler.ListByPR)
+			rt.Post("/{id}/documents", d.PRDocumentHandler.Upload)
+			rt.Delete("/{id}/documents/{docId}", d.PRDocumentHandler.Delete)
+			rt.Get("/{id}/documents/{docId}/download", d.PRDocumentHandler.Download) // BARU
+			rt.Get("/{id}/documents/{docId}/preview", d.PRDocumentHandler.Preview)   // BARU
+			
+			rt.Get("/{id}/history", d.PRHandler.History)
+			rt.Get("/{id}/approvals", d.PRHandler.ListApprovals)
+			rt.With(requireAccess("submit_pr")).Post("/{id}/submit", d.PRHandler.Submit)
+			rt.With(requireAccess("set_pr_priority")).Post("/{id}/priority", d.PRHandler.SetPriority)
+			
+			rt.With(requireAccess("approve_pr")).Post("/approvals/{approvalId}/approve", d.PRHandler.ApproveApproval)
+			rt.With(requireAccess("approve_pr")).Post("/approvals/{approvalId}/reject", d.PRHandler.RejectApproval)
+			rt.Get("/my-approvals", d.PRHandler.MyTurn)
+			
+			rt.Get("/{id}/comments", d.PRHandler.ListComments)
+			rt.Post("/{id}/comments", d.PRHandler.AddComment)
+			
+			rt.With(requireAccess("request_revision_pr")).Post("/approvals/{approvalId}/request-revision", d.PRHandler.RequestRevision)
+			rt.With(requireAccess("update_pr_amounts")).Post("/{id}/amounts", d.PRHandler.UpdateAmounts)
+			
+			rt.Get("/{id}/payments", d.PRPaymentHandler.ListByPR)
+			rt.Get("/{id}/payment-chain", d.PRPaymentHandler.PaymentChain)
+			rt.With(requireAccess("create_pr_payment")).Post("/{id}/payments", d.PRPaymentHandler.Create)
+			rt.With(requireAccess("confirm_pr_payment")).Post("/payments/{paymentId}/confirm", d.PRPaymentHandler.Confirm)
+			rt.With(requireAccess("confirm_pr_payment")).Post("/payments/{paymentId}/cancel", d.PRPaymentHandler.Cancel)
+		})
+
+		api.Route("/responsibles", func(rt chi.Router) {
+			rt.Get("/", d.ResponsibleHandler.List)
+			rt.Get("/select", d.ResponsibleHandler.Select)
+			rt.Get("/{id}", d.ResponsibleHandler.Detail)
+			rt.With(requireAccess("create_responsible")).Post("/", d.ResponsibleHandler.Create)
+			rt.With(requireAccess("edit_responsible")).Put("/{id}", d.ResponsibleHandler.Update)
+			rt.With(requireAccess("delete_responsible")).Delete("/{id}", d.ResponsibleHandler.Delete)
+			rt.With(requireAccess("change_stat_responsible")).Post("/{id}/activate", d.ResponsibleHandler.Activate)
+			rt.With(requireAccess("change_stat_responsible")).Post("/{id}/deactivate", d.ResponsibleHandler.Deactivate)
 		})
 
 		// Dashboard & activity feed: read-only, konsisten dengan pola GET list

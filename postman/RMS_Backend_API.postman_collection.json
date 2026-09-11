@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "8dacbc5a-4be7-4781-aab2-25c5f81b2483",
     "name": "RMS Backend API",
-    "description": "Koleksi Postman untuk RMS Backend (Go). Jalankan 'Auth > Login' dulu - access_token otomatis tersimpan ke environment dan dipakai semua request lain lewat Authorization Bearer Token di level Collection.",
+    "description": "Koleksi Postman untuk RMS Backend (Go). Jalankan 'Auth > Login' dulu - access_token otomatis tersimpan ke environment dan dipakai semua request lain lewat Authorization Bearer Token di level Collection.\n\nCatatan update modul Purchase Request: (1) tanda tangan requester ('prepared by') sekarang dipasang saat Submit, bukan saat Create; (2) po_amount & hpp bisa diisi sejak Create (opsional); (3) Set PR Priority sekarang wewenang requester, bukan approver level 1; (4) endpoint baru: Cancel PR, List/Upload/Delete PR Document.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -592,10 +592,10 @@
                 "divisions"
               ]
             },
-            "description": "",
+            "description": "DivisionRequest sekarang mewajibkan 'title' DAN 'code' (kode divisi, contoh: WH, SLS, FIN).",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"title\": \"Warehouse\"\n}",
+              "raw": "{\n  \"title\": \"Warehouse\",\n  \"code\": \"WH\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -637,10 +637,10 @@
                 "{{division_id}}"
               ]
             },
-            "description": "",
+            "description": "DivisionRequest sekarang mewajibkan 'title' DAN 'code' (kode divisi).",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"title\": \"Warehouse Ops\"\n}",
+              "raw": "{\n  \"title\": \"Warehouse Ops\",\n  \"code\": \"WH\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1583,6 +1583,63 @@
             "description": ""
           },
           "response": []
+        },
+        {
+          "name": "My Signature (get)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/admins/me/signature",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "admins",
+                "me",
+                "signature"
+              ]
+            },
+            "description": "Ambil tanda tangan terbaru milik admin yang sedang login. 404 kalau belum pernah unggah."
+          },
+          "response": []
+        },
+        {
+          "name": "Upload My Signature",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/admins/me/signature",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "admins",
+                "me",
+                "signature"
+              ]
+            },
+            "description": "multipart/form-data: 'file' (png/jpg/jpeg, maks 5MB) + 'name_pic'. WAJIB diunggah sebelum admin bisa membuat PR (requester) atau melakukan approve PR (approver).",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": []
+                },
+                {
+                  "key": "name_pic",
+                  "value": "Budi Santoso",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "response": []
         }
       ]
     },
@@ -2433,6 +2490,751 @@
               ]
             },
             "description": ""
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Purchase Requests",
+      "item": [
+        {
+          "name": "List PR",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/pr?status=",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "pr"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Tanpa 'status' -> daftar terpaginasi (page/item). Dengan '?status=submitted' dsb -> daftar tanpa paging (paged:false)."
+          },
+          "response": []
+        },
+        {
+          "name": "PR Detail",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/pr/{{pr_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "pr",
+                "{{pr_id}}"
+              ]
+            },
+            "description": "Detail 1 PR, termasuk pr_margin & pr_margin_percentage (BR-CALC-01/02, dihitung saat response, tidak disimpan di DB)."
+          },
+          "response": []
+        },
+        {
+          "name": "Export PR (RFP .docx)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/pr/{{pr_id}}/export",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "pr",
+                "{{pr_id}}",
+                "export"
+              ]
+            },
+            "description": "Butuh akses 'export_pr'. Mengembalikan file RFP_<no>.docx (Content-Disposition attachment)."
+          },
+          "response": []
+        },
+        {
+          "name": "Create PR",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/pr",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "pr"
+              ]
+            },
+            "description": "Butuh akses 'create_pr'. PR dibuat berstatus 'draft'. Tanda tangan requester TIDAK lagi wajib pada tahap ini (baru diwajibkan & dipasang sebagai 'prepared by' saat Submit PR for Approval). Admin WAJIB tetap terhubung ke divisi (admin_ref_division) untuk pembuatan nomor RFP. po_amount & hpp opsional diisi di awal (estimasi); dapat direvisi lagi lewat 'Update PR Amounts (margin)'.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ref_responsible\": \"{{responsible_id}}\",\n  \"description_item\": \"Pembelian ATK bulan Juli\",\n  \"sub_client\": \"\",\n  \"requested_amount\": 1500000,\n  \"po_amount\": 0,\n  \"hpp\": 0,\n  \"qout_no\": \"\",\n  \"target_invoice_date\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) { pm.environment.set('pr_id', pm.response.json().data.pr_id); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update PR",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/pr/{{pr_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "pr",
+                "{{pr_id}}"
+              ]
+            },
+            "description": "Butuh akses 'edit_pr'. Hanya boleh dilakukan oleh pemilik PR, dan hanya saat status PR 'draft' atau 'revision'.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ref_responsible\": \"{{responsible_id}}\",\n  \"description_item\": \"Pembelian ATK bulan Juli (revisi)\",\n  \"sub_client\": \"\",\n  \"requested_amount\": 1600000,\n  \"qout_no\": \"\",\n  \"target_invoice_date\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Cancel PR",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/pr/{{pr_id}}/cancel",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "pr",
+                "{{pr_id}}",
+                "cancel"
+              ]
+            },
+            "description": "BARU. Membatalkan PR milik sendiri. Hanya bisa dilakukan requester (pr_ref_admin) selama PR masih berstatus draft, revision, atau submitted. PR yang sudah approved/completed/rejected/cancelled tidak bisa dibatalkan lewat endpoint ini (pembatalan setelah approved & belum lunas ditangani lewat 'Cancel PR Payment', karena status paid/unpaid diturunkan dari header T_Pr_Payment, bukan pr_status). Alasan pembatalan (notes) wajib diisi.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"notes\": \"Kebutuhan dibatalkan oleh requester, tidak jadi dilanjutkan.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List PR Documents",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/pr/{{pr_id}}/documents",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "pr",
+                "{{pr_id}}",
+                "documents"
+              ]
+            },
+            "description": "BARU. Daftar dokumen pendukung yang dilampirkan pada PR ini (mis. cost_control, quotation, invoice, contract, other)."
+          },
+          "response": []
+        },
+        {
+          "name": "Upload PR Document",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/pr/{{pr_id}}/documents",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "pr",
+                "{{pr_id}}",
+                "documents"
+              ]
+            },
+            "description": "BARU. Butuh akses 'upload_pr_document'. Hanya requester pemilik PR yang boleh mengunggah. document_type harus salah satu dari: cost_control, quotation, invoice, contract, other (default 'other' jika dikosongkan). Wajib diisi 'cost_control' untuk PR dengan requested_amount > Rp 50.000.000 sebelum PR dapat disubmit. Format file: pdf, doc, docx, jpg, jpeg, png (maks 10MB).",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "document_type",
+                  "type": "text",
+                  "value": "cost_control"
+                },
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": ""
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) { pm.environment.set('pr_doc_id', pm.response.json().data.document_id); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete PR Document",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/pr/{{pr_id}}/documents/{{pr_doc_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "pr",
+                "{{pr_id}}",
+                "documents",
+                "{{pr_doc_id}}"
+              ]
+            },
+            "description": "BARU. Hanya admin yang mengunggah dokumen tersebut yang boleh menghapusnya."
+          },
+          "response": []
+        },
+        {
+          "name": "PR History",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/pr/{{pr_id}}/history",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "pr",
+                "{{pr_id}}",
+                "history"
+              ]
+            },
+            "description": "Riwayat perubahan status PR (BR-REV-05)."
+          },
+          "response": []
+        },
+        {
+          "name": "List PR Approvals",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/pr/{{pr_id}}/approvals",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "pr",
+                "{{pr_id}}",
+                "approvals"
+              ]
+            },
+            "description": "Seluruh baris approval lintas round (riwayat penuh, BR-APR-05)."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "if (data && data.data && data.data.length > 0) {",
+                  "    pm.environment.set('approval_id', data.data[0].approval_id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Submit PR for Approval",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/pr/{{pr_id}}/submit",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "pr",
+                "{{pr_id}}",
+                "submit"
+              ]
+            },
+            "description": "Butuh akses 'submit_pr'. PR harus berstatus draft/revision dan dimiliki actor. BARU: requester WAJIB sudah memiliki tanda tangan terdaftar (lihat Admins > Upload My Signature) - tanda tangan terbaru dipasang sebagai 'prepared by' pada PR ini saat submit berhasil (dipindah dari Create PR). Level 1 wajib disertakan (maks 3 level). Jika requested_amount > Rp 50.000.000, dokumen bertipe cost_control wajib sudah diunggah lebih dulu lewat 'Upload PR Document'.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"approvers\": [\n    {\n      \"level\": 1,\n      \"type\": \"manager\",\n      \"admin_id\": \"{{admin_id}}\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Set PR Priority",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/pr/{{pr_id}}/priority",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "pr",
+                "{{pr_id}}",
+                "priority"
+              ]
+            },
+            "description": "Butuh akses 'set_pr_priority'. BARU: sekarang hanya REQUESTER (pemilik PR / pr_ref_admin) yang boleh mengatur priority, bukan lagi approver level 1. priority: low | medium | high | urgent, atau string kosong untuk unset. Tidak dapat diatur selama PR masih berstatus draft.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"priority\": \"high\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Approve Approval",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/pr/approvals/{{approval_id}}/approve",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "pr",
+                "approvals",
+                "{{approval_id}}",
+                "approve"
+              ]
+            },
+            "description": "Butuh akses 'approve_pr'. Approver WAJIB punya tanda tangan terdaftar. Sequential: level N baru bisa diputuskan setelah level N-1 approved pada round yang sama.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"notes\": \"Disetujui, sesuai anggaran.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Reject Approval",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/pr/approvals/{{approval_id}}/reject",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "pr",
+                "approvals",
+                "{{approval_id}}",
+                "reject"
+              ]
+            },
+            "description": "Butuh akses 'approve_pr'. Menolak approval -> PR bertransisi ke status 'rejected'.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"notes\": \"Anggaran tidak mencukupi.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "My Pending Approvals",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/pr/my-approvals",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "pr",
+                "my-approvals"
+              ]
+            },
+            "description": "Daftar approval yang menunggu keputusan admin yang sedang login (level 1, atau level berikutnya setelah level sebelumnya approved, pada round terbaru)."
+          },
+          "response": []
+        },
+        {
+          "name": "List PR Comments",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/pr/{{pr_id}}/comments",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "pr",
+                "{{pr_id}}",
+                "comments"
+              ]
+            },
+            "description": "Hanya bisa diakses oleh admin yang terkait dengan PR (requester, approver, atau finance terkait pembayaran)."
+          },
+          "response": []
+        },
+        {
+          "name": "Add PR Comment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/pr/{{pr_id}}/comments",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "pr",
+                "{{pr_id}}",
+                "comments"
+              ]
+            },
+            "description": "type bebas: general | revision_request | internal_note, dst (sengaja dipisah dari approval_notes formal, lihat PRCommentRequest).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"Mohon lampirkan dokumen pendukung tambahan.\",\n  \"type\": \"general\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Request Revision",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/pr/approvals/{{approval_id}}/request-revision",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "pr",
+                "approvals",
+                "{{approval_id}}",
+                "request-revision"
+              ]
+            },
+            "description": "Butuh akses 'request_revision_pr'. HANYA approver level 1 atau 2 yang boleh meminta revisi (BR-REV-01..04, level >= 3/director ditolak). PR harus berstatus submitted.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"notes\": \"Tolong lampirkan RAB terbaru.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update PR Amounts (margin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/pr/{{pr_id}}/amounts",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "pr",
+                "{{pr_id}}",
+                "amounts"
+              ]
+            },
+            "description": "BARU (Slice G, BR-CALC-01/02). Butuh akses 'update_pr_amounts'. Hanya po_amount & hpp yang disimpan; pr_margin & pr_margin_percentage dihitung ulang saat response (margin = po_amount - hpp, margin_percentage = margin / po_amount * 100, aman terhadap pembagian nol). Catatan: siapa yang berwenang memanggil ini & pada status PR apa saja masih menunggu konfirmasi BR lebih lanjut.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"po_amount\": 12000000,\n  \"hpp\": 9500000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List PR Payments",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/pr/{{pr_id}}/payments",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "pr",
+                "{{pr_id}}",
+                "payments"
+              ]
+            },
+            "description": "Daftar tahapan pembayaran (down_payment/full_payment/final_payment, dst) untuk PR ini."
+          },
+          "response": []
+        },
+        {
+          "name": "Create PR Payment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/pr/{{pr_id}}/payments",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "pr",
+                "{{pr_id}}",
+                "payments"
+              ]
+            },
+            "description": "Butuh akses 'create_pr_payment'. PR harus berstatus 'approved' sebelum bisa dicatat pembayarannya.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stage\": \"down_payment\",\n  \"amount\": 5000000,\n  \"type\": \"transfer\",\n  \"bank\": \"BCA\",\n  \"bank_account_no\": \"1234567890\",\n  \"bank_account_name\": \"PT Contoh Vendor\",\n  \"priority_date\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) { pm.environment.set('payment_id', pm.response.json().data.payment_id); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Confirm PR Payment",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/pr/payments/{{payment_id}}/confirm",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "pr",
+                "payments",
+                "{{payment_id}}",
+                "confirm"
+              ]
+            },
+            "description": "Butuh akses 'confirm_pr_payment'. Maker-checker: admin yang mencatat pembayaran (input) tidak boleh sama dengan admin yang mengonfirmasi lunas (BR-PAY-01). Jika seluruh pembayaran PR sudah 'paid', status PR otomatis menjadi 'completed'."
+          },
+          "response": []
+        },
+        {
+          "name": "Cancel PR Payment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/pr/payments/{{payment_id}}/cancel",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "pr",
+                "payments",
+                "{{payment_id}}",
+                "cancel"
+              ]
+            },
+            "description": "Butuh akses 'confirm_pr_payment'. Tidak bisa membatalkan pembayaran yang sudah 'paid' atau sudah 'cancelled' sebelumnya.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"notes\": \"Salah input nominal, dibatalkan dan akan dicatat ulang.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
           },
           "response": []
         }
