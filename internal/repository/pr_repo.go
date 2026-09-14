@@ -19,7 +19,7 @@ const prDetailSelect = `
 	       pr.pr_description_item, pr.pr_subclient, pr.pr_requested_amount, pr.pr_qout_no,
 	       pr.pr_po_amount, pr.pr_hpp, pr.pr_target_invoice_date, pr.pr_status, pr.pr_priority,
 	       pr.pr_priority_ref_admin, pr.pr_priority_date, pr.pr_signature_ref,
-	       pr.pr_ref_previous_pr,
+	       pr.pr_ref_previous_pr, pr.pr_po_no,
 	       pr.pr_create_date, pr.pr_modify_date,
 	       COALESCE(ad.admin_name, ''), COALESCE(rp.responsible_name, ''), COALESCE(sg.signature_file, ''),
 	       COALESCE(prev.pr_rfp_no, '')
@@ -30,18 +30,15 @@ const prDetailSelect = `
 	LEFT JOIN T_Purchase_Request prev ON pr.pr_ref_previous_pr = prev.pr_id
 `
 
-func scanPR(row interface {
-	Scan(dest ...interface{}) error
-}) (*models.PurchaseRequest, error) {
+func scanPR(row interface{ Scan(dest ...interface{}) error }) (*models.PurchaseRequest, error) {
 	var v models.PurchaseRequest
 	err := row.Scan(&v.ID, &v.RefAdmin, &v.RefResponsible, &v.RfpNo,
 		&v.DescriptionItem, &v.SubClient, &v.RequestedAmount, &v.QoutNo,
 		&v.PoAmount, &v.Hpp, &v.TargetInvoiceDate, &v.Status, &v.Priority,
 		&v.PriorityRefAdmin, &v.PriorityDate, &v.SignatureRef,
-		&v.RefPreviousPR,
+		&v.RefPreviousPR, &v.PoNo,
 		&v.CreateDate, &v.ModifyDate,
-		&v.AdminName, &v.ResponsibleName, &v.SignatureFile,
-		&v.PreviousRfpNo)
+		&v.AdminName, &v.ResponsibleName, &v.SignatureFile, &v.PreviousRfpNo)
 	if err != nil {
 		return nil, err
 	}
@@ -304,9 +301,14 @@ func (r *PRRepo) UpdatePriority(ctx context.Context, id int, priority, setByAdmi
 	return err
 }
 
-func (r *PRRepo) UpdateAmounts(ctx context.Context, id int, poAmount, hpp float64) error {
+func (r *PRRepo) UpdateAmounts(ctx context.Context, id int, poAmount, hpp float64, poNo string) error {
+	var poNoArg interface{}
+	if poNo != "" {
+		poNoArg = poNo
+	}
 	_, err := r.db.ExecContext(ctx,
-		`UPDATE T_Purchase_Request SET pr_po_amount = ?, pr_hpp = ? WHERE pr_id = ?`, poAmount, hpp, id)
+		`UPDATE T_Purchase_Request SET pr_po_amount = ?, pr_hpp = ?, pr_po_no = ? WHERE pr_id = ?`,
+		poAmount, hpp, poNoArg, id)
 	return err
 }
 

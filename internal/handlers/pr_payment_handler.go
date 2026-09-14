@@ -4,6 +4,8 @@ import (
 	// "database/sql"
 	"errors"
 	"net/http"
+	"strings"
+	"fmt"
 
 	"github.com/go-chi/chi/v5"
 
@@ -17,10 +19,13 @@ type PRPaymentHandler struct {
 	repo    *repository.PRPaymentRepo
 	prRepo  *repository.PRRepo
 	service *service.PRPaymentService
+	exportService *service.PRPaymentExportService
 }
 
-func NewPRPaymentHandler(repo *repository.PRPaymentRepo, prRepo *repository.PRRepo, svc *service.PRPaymentService) *PRPaymentHandler {
-	return &PRPaymentHandler{repo: repo, prRepo: prRepo, service: svc}
+var validPaymentExportStatus = map[string]bool{"pending": true, "paid": true, "cancelled": true, "draft": true}
+
+func NewPRPaymentHandler(repo *repository.PRPaymentRepo, prRepo *repository.PRRepo, svc *service.PRPaymentService, exportService *service.PRPaymentExportService) *PRPaymentHandler {
+	return &PRPaymentHandler{repo: repo, prRepo: prRepo, service: svc, exportService: exportService}
 }
 
 // GET /api/pr/{id}/payments
@@ -175,4 +180,38 @@ func (h *PRPaymentHandler) PaymentChain(w http.ResponseWriter, r *http.Request) 
 		})
 	}
 	utils.OK(w, "Fetch success", out)
+}
+
+func (h *PRPaymentHandler) Export(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	startDate := utils.ParseDateParam(q.Get("start_date"))
+	endDate := utils.ParseDateParam(q.Get("end_date"))
+	if (startDate == "") != (endDate == "") {
+		utils.Error(w, http.StatusBadRequest, "start_date dan end_date harus diisi bersamaan")
+		return
+	}
+
+	status := strings.ToLower(strings.TrimSpace(q.Get("status")))
+	if status != "" && !validPaymentExportStatus[status] {
+		utils.Error(w, http.StatusBadRequest, "status tidak valid (gunakan: pending, paid, cancelled, draft)")
+		return
+	}
+
+	filter := service.PRPaymentExportFilter{
+		StartDate:     startDate,
+		EndDate:       endDate,
+		ResponsibleID: utils.AtoiDefault(q.Get("responsible"), 0),
+		Status:        status,
+		AdminID:       q.Get("user"),
+	}
+
+	data, filename, err := h.exportService.GenerateXlsx(r.Context(), filter)
+	if err != nil {
+		utils.Error(w, http.StatusInternalServerError, "Gagal membuat file export summary payment")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+	w.Write(data)
 }

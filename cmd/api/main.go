@@ -93,6 +93,7 @@ func main() {
 	adminSignatureRepo,
 	"./storage/uploads",
 	)
+	prPaymentExportService := service.NewPRPaymentExportService(prPaymentRepo, prRepo)
 	exportService := service.NewExportService(poRepo, service.ExportConfig{
 		CacheDir:     cfg.POExportCacheDir,
 		TemplatePath: cfg.POExportTemplate,
@@ -123,7 +124,7 @@ func main() {
 		ClientHandler:    handlers.NewClientHandler(clientRepo),
 		POHandler:        handlers.NewPOHandler(poRepo, activityRepo, clientRepo, ppnRepo, exportService),
 		PRHandler:        handlers.NewPRHandler(prRepo, prHistoryRepo, prApprovalRepo, prCommentRepo, prService, prApprovalService, prExportService),
-		PRPaymentHandler: handlers.NewPRPaymentHandler(prPaymentRepo, prRepo, prPaymentService),
+		PRPaymentHandler: handlers.NewPRPaymentHandler(prPaymentRepo, prRepo, prPaymentService, prPaymentExportService),
 		SignatureHandler: handlers.NewSignatureHandler(adminSignatureRepo, "./storage/uploads"),
 
 		PRDocumentHandler: handlers.NewPRDocumentHandler(prDocumentRepo, prRepo, "./storage/uploads"),

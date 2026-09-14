@@ -278,15 +278,18 @@ func New(d *Dependencies) http.Handler {
 			rt.Delete("/{id}/documents/{docId}", d.PRDocumentHandler.Delete)
 			rt.Get("/{id}/documents/{docId}/download", d.PRDocumentHandler.Download) // BARU
 			rt.Get("/{id}/documents/{docId}/preview", d.PRDocumentHandler.Preview)   // BARU
+			rt.With(requireAccess("export_pr_payment_report")).Get("/payments/export", d.PRPaymentHandler.Export)
 			
 			rt.Get("/{id}/history", d.PRHandler.History)
 			rt.Get("/{id}/approvals", d.PRHandler.ListApprovals)
 			rt.With(requireAccess("submit_pr")).Post("/{id}/submit", d.PRHandler.Submit)
+			rt.With(requireAccess("submit_pr")).Post("/bulk-submit", d.PRHandler.BulkSubmit)
 			rt.With(requireAccess("set_pr_priority")).Post("/{id}/priority", d.PRHandler.SetPriority)
 			
-			rt.With(requireAccess("approve_pr")).Post("/approvals/{approvalId}/approve", d.PRHandler.ApproveApproval)
-			rt.With(requireAccess("approve_pr")).Post("/approvals/{approvalId}/reject", d.PRHandler.RejectApproval)
 			rt.Get("/my-approvals", d.PRHandler.MyTurn)
+			rt.With(requireAccess("approve_pr")).Post("/approvals/{approvalId}/approve", d.PRHandler.ApproveApproval)
+			rt.With(requireAccess("approve_pr")).Post("/approvals/bulk-decide", d.PRHandler.BulkDecide)
+			rt.With(requireAccess("approve_pr")).Post("/approvals/{approvalId}/reject", d.PRHandler.RejectApproval)
 			
 			rt.Get("/{id}/comments", d.PRHandler.ListComments)
 			rt.Post("/{id}/comments", d.PRHandler.AddComment)

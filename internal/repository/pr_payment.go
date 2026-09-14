@@ -2,9 +2,11 @@ package repository
 
 import (
 	"context"
-	// "database/sql"
-	"rms-backend/internal/db"
+	"fmt"
+	"strings"
+	"time"
 
+	"rms-backend/internal/db"
 	"rms-backend/internal/models"
 )
 
@@ -150,4 +152,114 @@ func (r *PRPaymentRepo) ActivateDraftPayments(ctx context.Context, prID int) err
 		`UPDATE T_Pr_Payment SET payment_status = 'pending' WHERE payment_ref_pr = ? AND payment_status = 'draft'`,
 		prID)
 	return err
+}
+
+type PaymentExportFilter struct {
+	StartDate     string // yyyy-mm-dd, berdasarkan payment_create_date
+	EndDate       string
+	ResponsibleID int
+	Status        string // pending | paid | cancelled | draft, "" = semua
+	AdminID       string // requester (pr_ref_admin) - filter "user"
+}
+
+type PaymentExportRow struct {
+	PaymentID         int
+	PRID              int
+	RfpNo             string
+	RequesterName     string
+	DescriptionItem   string
+	ResponsibleName   string
+	CoaCode           string
+	SubClient         string
+	Amount            float64
+	Bank              string
+	BankAccountName   string
+	BankAccountNo     string
+	PoAmount          float64
+	Hpp               float64
+	PoNo              string
+	TargetInvoiceDate *time.Time
+	PaymentStatus     string
+	PaymentCreateDate time.Time
+}
+
+func (r *PRPaymentRepo) ListForExport(ctx context.Context, f PaymentExportFilter) ([]PaymentExportRow, error) {
+	conds := []string{"1=1"}
+	var args []interface{}
+
+	if f.StartDate != "" && f.EndDate != "" {
+		conds = append(conds, "DATE(p.payment_create_date) BETWEEN ? AND ?")
+		args = append(args, f.StartDate, f.EndDate)
+	}
+	if f.ResponsibleID != 0 {
+		conds = append(conds, "pr.pr_ref_responsible = ?")
+		args = append(args, f.ResponsibleID)
+	}
+	if f.Status != "" {
+		conds = append(conds, "p.payment_status = ?")
+		args = append(args, f.Status)
+	}
+	if f.AdminID != "" {
+		conds = append(conds, "pr.pr_ref_admin = ?")
+		args = append(args, f.AdminID)
+	}
+
+	query := `
+		SELECT p.payment_id, pr.pr_id, pr.pr_rfp_no,
+		       COALESCE(ad.admin_name, ''), pr.pr_description_item,
+		       COALESCE(rp.responsible_name, ''), COALESCE(rp.responsible_coa_code, ''),
+		       COALESCE(pr.pr_subclient, ''), p.payment_amount,
+		       COALESCE(p.payment_bank, ''), COALESCE(p.payment_bank_account_name, ''),
+		       COALESCE(p.payment_bank_account_no, ''),
+		       pr.pr_po_amount, pr.pr_hpp, COALESCE(pr.pr_po_no, ''),
+		       pr.pr_target_invoice_date, p.payment_status, p.payment_create_date
+		FROM T_Pr_Payment p
+		JOIN T_Purchase_Request pr ON p.payment_ref_pr = pr.pr_id
+		LEFT JOIN T_Responsible rp ON pr.pr_ref_responsible = rp.responsible_id
+		LEFT JOIN T_Admin ad ON pr.pr_ref_admin = ad.admin_id
+		WHERE ` + strings.Join(conds, " AND ") + `
+		ORDER BY p.payment_create_date ASC, p.payment_id ASC`
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []PaymentExportRow
+	for rows.Next() {
+		var v PaymentExportRow
+		if err := rows.Scan(&v.PaymentID, &v.PRID, &v.RfpNo,
+			&v.RequesterName, &v.DescriptionItem, &v.ResponsibleName, &v.CoaCode,
+			&v.SubClient, &v.Amount, &v.Bank, &v.BankAccountName, &v.BankAccountNo,
+			&v.PoAmount, &v.Hpp, &v.PoNo, &v.TargetInvoiceDate, &v.PaymentStatus,
+			&v.PaymentCreateDate); err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
+func (r *PRPaymentRepo) SumPaidBeforeInChain(ctx context.Context, prIDs []int, before time.Time, excludePaymentID int) (float64, error) {
+	if len(prIDs) == 0 {
+		return 0, nil
+	}
+	placeholders := make([]string, len(prIDs))
+	args := make([]interface{}, 0, len(prIDs)+3)
+	for i, id := range prIDs {
+		placeholders[i] = "?"
+		args = append(args, id)
+	}
+	query := fmt.Sprintf(`
+		SELECT COALESCE(SUM(payment_amount), 0) FROM T_Pr_Payment
+		WHERE payment_ref_pr IN (%s) AND payment_status = 'paid'
+		  AND payment_id != ?
+		  AND (payment_create_date < ? OR (payment_create_date = ? AND payment_id < ?))`,
+		strings.Join(placeholders, ","))
+	args = append(args, excludePaymentID, before, before, excludePaymentID)
+
+	var total float64
+	err := r.db.QueryRowContext(ctx, query, args...).Scan(&total)
+	return total, err
 }

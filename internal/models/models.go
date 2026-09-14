@@ -243,6 +243,7 @@ type PurchaseRequest struct {
 	ID                int        `json:"pr_id" db:"pr_id"`
 	RefAdmin          string     `json:"pr_ref_admin" db:"pr_ref_admin"`
 	RefResponsible    int        `json:"pr_ref_responsible" db:"pr_ref_responsible"`
+	PoNo          *string `json:"pr_po_no,omitempty" db:"pr_po_no"`
 	RfpNo             string     `json:"pr_rfp_no" db:"pr_rfp_no"`
 	DescriptionItem   string     `json:"pr_description_item" db:"pr_description_item"`
 	SubClient         *string    `json:"pr_subclient" db:"pr_subclient"`

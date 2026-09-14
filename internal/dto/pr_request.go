@@ -3,6 +3,7 @@ package dto
 import (
 	"errors"
 	"strings"
+	"fmt"
 
 	"rms-backend/internal/utils"
 )
@@ -126,29 +127,7 @@ type SubmitPRRequest struct {
 
 
 func (r SubmitPRRequest) Validate() error {
-	if len(r.Approvers) == 0 {
-		return errors.New("minimal satu approver wajib ditentukan")
-	}
-	if len(r.Approvers) > 3 {
-		return errors.New("maksimal 3 level approver")
-	}
-	seenLevel := map[int]bool{}
-	for i, a := range r.Approvers {
-		if err := a.Validate(); err != nil {
-			return errors.New("approver ke-" + itoa(i+1) + ": " + err.Error())
-		}
-		lvl := int(a.Level)
-		if seenLevel[lvl] {
-			return errors.New("level approval tidak boleh duplikat dalam satu kali submit")
-		}
-		seenLevel[lvl] = true
-	}
-	
-	
-	if !seenLevel[1] {
-		return errors.New("approver level 1 wajib disertakan saat submit")
-	}
-	return nil
+	return validateApproverAssignments(r.Approvers)
 }
 
 type DecidePRApprovalRequest struct {
@@ -192,6 +171,7 @@ func (r PRCommentRequest) Validate() error {
 type UpdatePRAmountsRequest struct {
 	PoAmount utils.FlexFloat `json:"po_amount"`
 	Hpp      utils.FlexFloat `json:"hpp"`
+	PoNo     string          `json:"po_no"`
 }
 
 func (r UpdatePRAmountsRequest) Validate() error {
@@ -257,6 +237,105 @@ func (r *CancelPRRequest) Normalize() {
 func (r CancelPRRequest) Validate() error {
 	if r.Notes == "" {
 		return errors.New("alasan pembatalan purchase request wajib diisi")
+	}
+	return nil
+}
+
+func validateApproverAssignments(approvers []ApproverAssignmentRequest) error {
+	if len(approvers) == 0 {
+		return errors.New("minimal satu approver wajib ditentukan")
+	}
+	if len(approvers) > 3 {
+		return errors.New("maksimal 3 level approver")
+	}
+	seenLevel := map[int]bool{}
+	for i, a := range approvers {
+		if err := a.Validate(); err != nil {
+			return fmt.Errorf("approver ke-%d: %w", i+1, err)
+		}
+		lvl := int(a.Level)
+		if seenLevel[lvl] {
+			return errors.New("level approval tidak boleh duplikat dalam satu kali submit")
+		}
+		seenLevel[lvl] = true
+	}
+	if !seenLevel[1] {
+		return errors.New("approver level 1 wajib disertakan saat submit")
+	}
+	return nil
+}
+
+type BulkSubmitPRItem struct {
+	PRID      utils.FlexInt               `json:"pr_id"`
+	Approvers []ApproverAssignmentRequest `json:"approvers,omitempty"` // opsional, override default_approvers
+}
+
+type BulkSubmitPRRequest struct {
+	DefaultApprovers []ApproverAssignmentRequest `json:"default_approvers,omitempty"`
+	Items            []BulkSubmitPRItem          `json:"items"`
+}
+
+func (r BulkSubmitPRRequest) Validate() error {
+	if len(r.Items) == 0 {
+		return errors.New("items wajib diisi minimal 1 purchase request")
+	}
+	if len(r.Items) > 50 {
+		return errors.New("maksimal 50 purchase request per bulk submit")
+	}
+	seenPR := map[int]bool{}
+	for i, it := range r.Items {
+		id := int(it.PRID)
+		if id == 0 {
+			return fmt.Errorf("item ke-%d: pr_id wajib diisi", i+1)
+		}
+		if seenPR[id] {
+			return fmt.Errorf("item ke-%d: pr_id %d duplikat dalam satu batch", i+1, id)
+		}
+		seenPR[id] = true
+
+		approvers := it.Approvers
+		if len(approvers) == 0 {
+			approvers = r.DefaultApprovers
+		}
+		if err := validateApproverAssignments(approvers); err != nil {
+			return fmt.Errorf("item ke-%d (pr_id=%d): %w", i+1, id, err)
+		}
+	}
+	return nil
+}
+
+// --- Bulk Decide (Approve/Reject) ---
+
+type BulkApprovalItem struct {
+	ApprovalID utils.FlexInt `json:"approval_id"`
+	Notes      string        `json:"notes,omitempty"`
+}
+
+type BulkDecideApprovalRequest struct {
+	Decision string              `json:"decision"` // "approved" | "rejected"
+	Items    []BulkApprovalItem  `json:"items"`
+}
+
+func (r BulkDecideApprovalRequest) Validate() error {
+	if r.Decision != "approved" && r.Decision != "rejected" {
+		return errors.New("decision harus 'approved' atau 'rejected'")
+	}
+	if len(r.Items) == 0 {
+		return errors.New("items wajib diisi minimal 1 approval")
+	}
+	if len(r.Items) > 50 {
+		return errors.New("maksimal 50 approval per bulk decide")
+	}
+	seen := map[int]bool{}
+	for i, it := range r.Items {
+		id := int(it.ApprovalID)
+		if id == 0 {
+			return fmt.Errorf("item ke-%d: approval_id wajib diisi", i+1)
+		}
+		if seen[id] {
+			return fmt.Errorf("item ke-%d: approval_id %d duplikat dalam satu batch", i+1, id)
+		}
+		seen[id] = true
 	}
 	return nil
 }

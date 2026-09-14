@@ -561,7 +561,7 @@ func (h *PRHandler) UpdateAmounts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.repo.UpdateAmounts(r.Context(), id, float64(req.PoAmount), float64(req.Hpp)); err != nil {
+	if err := h.repo.UpdateAmounts(r.Context(), id, float64(req.PoAmount), float64(req.Hpp), req.PoNo); err != nil {
 		utils.Error(w, http.StatusInternalServerError, "Gagal memperbarui nominal purchase request")
 		return
 	}
@@ -629,4 +629,89 @@ func (h *PRHandler) Cancel(w http.ResponseWriter, r *http.Request) {
 	default:
 		utils.Error(w, http.StatusInternalServerError, "Gagal membatalkan purchase request")
 	}
+}
+
+func (h *PRHandler) BulkSubmit(w http.ResponseWriter, r *http.Request) {
+	var req dto.BulkSubmitPRRequest
+	if err := decodeJSON(r, &req); err != nil {
+		utils.Error(w, http.StatusBadRequest, "Body permintaan tidak valid")
+		return
+	}
+	if err := req.Validate(); err != nil {
+		utils.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	adminID, ok := actorFromContext(r.Context())
+	if !ok {
+		utils.Error(w, http.StatusUnauthorized, "Tidak terautentikasi")
+		return
+	}
+
+	items := make([]service.BulkSubmitItem, 0, len(req.Items))
+	for _, it := range req.Items {
+		approversDTO := it.Approvers
+		if len(approversDTO) == 0 {
+			approversDTO = req.DefaultApprovers
+		}
+		approvers := make([]service.ApproverAssignment, 0, len(approversDTO))
+		for _, a := range approversDTO {
+			approvers = append(approvers, service.ApproverAssignment{
+				Level: int(a.Level), Type: a.Type, AdminID: a.AdminID,
+			})
+		}
+		items = append(items, service.BulkSubmitItem{PRID: int(it.PRID), Approvers: approvers})
+	}
+
+	results := h.approvalService.BulkSubmitForApproval(r.Context(), adminID, items)
+
+	successCount := 0
+	for _, res := range results {
+		if res.Success {
+			successCount++
+		}
+	}
+	msg := fmt.Sprintf("Bulk submit selesai: %d berhasil, %d gagal dari %d total",
+		successCount, len(results)-successCount, len(results))
+	utils.OK(w, msg, results)
+}
+
+// POST /api/pr/approvals/bulk-decide
+func (h *PRHandler) BulkDecide(w http.ResponseWriter, r *http.Request) {
+	var req dto.BulkDecideApprovalRequest
+	if err := decodeJSON(r, &req); err != nil {
+		utils.Error(w, http.StatusBadRequest, "Body permintaan tidak valid")
+		return
+	}
+	if err := req.Validate(); err != nil {
+		utils.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	adminID, ok := actorFromContext(r.Context())
+	if !ok {
+		utils.Error(w, http.StatusUnauthorized, "Tidak terautentikasi")
+		return
+	}
+
+	items := make([]service.BulkDecideItem, 0, len(req.Items))
+	for _, it := range req.Items {
+		items = append(items, service.BulkDecideItem{ApprovalID: int(it.ApprovalID), Notes: it.Notes})
+	}
+
+	results := h.approvalService.BulkDecide(r.Context(), adminID, req.Decision, items)
+
+	successCount := 0
+	for _, res := range results {
+		if res.Success {
+			successCount++
+		}
+	}
+	actionLabel := "approve"
+	if req.Decision == "rejected" {
+		actionLabel = "reject"
+	}
+	msg := fmt.Sprintf("Bulk %s selesai: %d berhasil, %d gagal dari %d total",
+		actionLabel, successCount, len(results)-successCount, len(results))
+	utils.OK(w, msg, results)
 }

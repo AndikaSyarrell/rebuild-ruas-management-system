@@ -291,3 +291,95 @@ func (s *PRApprovalService) SetPriority(ctx context.Context, prID int, adminID, 
 
 	return s.prRepo.UpdatePriority(ctx, prID, priority, adminID)
 }
+
+type BulkSubmitItem struct {
+	PRID      int
+	Approvers []ApproverAssignment
+}
+
+type BulkSubmitResult struct {
+	PRID    int    `json:"pr_id"`
+	Success bool   `json:"success"`
+	Error   string `json:"error,omitempty"`
+}
+
+func (s *PRApprovalService) BulkSubmitForApproval(ctx context.Context, actorAdminID string, items []BulkSubmitItem) []BulkSubmitResult {
+	results := make([]BulkSubmitResult, 0, len(items))
+	for _, it := range items {
+		err := s.SubmitForApproval(ctx, it.PRID, actorAdminID, it.Approvers)
+		if err != nil {
+			results = append(results, BulkSubmitResult{
+				PRID: it.PRID, Success: false, Error: submitErrorMessage(err),
+			})
+			continue
+		}
+		results = append(results, BulkSubmitResult{PRID: it.PRID, Success: true})
+	}
+	return results
+}
+
+func submitErrorMessage(err error) string {
+	switch {
+	case errors.Is(err, ErrNotFound):
+		return "Purchase request tidak ditemukan"
+	case errors.Is(err, ErrPRNotEligibleForSubmission):
+		return "Purchase request harus berstatus draft atau revision sebelum dapat disubmit"
+	case errors.Is(err, ErrRequesterSignatureRequired):
+		return "Requester belum memiliki tanda tangan terdaftar"
+	case errors.Is(err, ErrApprovalLevelAlreadyExists):
+		return "Level approval ini sudah dibuat untuk round yang sama"
+	case errors.Is(err, ErrApprovalNoApprovers):
+		return "Minimal satu approver wajib ditentukan"
+	case errors.Is(err, ErrPRNotOwnedByActor):
+		return "Purchase request ini bukan milik admin yang login"
+	case errors.Is(err, ErrCostControlAttachmentRequired):
+		return "Dokumen cost control wajib diunggah terlebih dahulu (nominal di atas Rp 50.000.000)"
+	default:
+		return "Gagal submit purchase request"
+	}
+}
+
+type BulkDecideItem struct {
+	ApprovalID int
+	Notes      string
+}
+
+type BulkDecideResult struct {
+	ApprovalID int    `json:"approval_id"`
+	Success    bool   `json:"success"`
+	Error      string `json:"error,omitempty"`
+}
+
+func (s *PRApprovalService) BulkDecide(ctx context.Context, actorAdminID, decision string, items []BulkDecideItem) []BulkDecideResult {
+	results := make([]BulkDecideResult, 0, len(items))
+	for _, it := range items {
+		err := s.Decide(ctx, it.ApprovalID, actorAdminID, decision, it.Notes)
+		if err != nil {
+			results = append(results, BulkDecideResult{
+				ApprovalID: it.ApprovalID, Success: false, Error: decideErrorMessage(err),
+			})
+			continue
+		}
+		results = append(results, BulkDecideResult{ApprovalID: it.ApprovalID, Success: true})
+	}
+	return results
+}
+
+func decideErrorMessage(err error) string {
+	switch {
+	case errors.Is(err, ErrNotFound):
+		return "Baris approval tidak ditemukan"
+	case errors.Is(err, ErrApprovalNotOwnedByActor):
+		return "Baris approval ini bukan milik admin yang login"
+	case errors.Is(err, ErrApprovalSequenceViolation):
+		return "Approval level sebelumnya belum disetujui"
+	case errors.Is(err, ErrPRNotSubmittedForDecision):
+		return "Purchase request ini sudah tidak berstatus submitted"
+	case errors.Is(err, ErrInvalidApprovalDecision):
+		return "Keputusan approval harus approved atau rejected"
+	case errors.Is(err, ErrApproverSignatureRequired):
+		return "Approver belum memiliki tanda tangan terdaftar"
+	default:
+		return "Gagal memproses keputusan approval"
+	}
+}
