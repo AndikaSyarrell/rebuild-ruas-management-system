@@ -2540,7 +2540,7 @@
                 "{{pr_id}}"
               ]
             },
-            "description": "Detail 1 PR, termasuk pr_margin & pr_margin_percentage (BR-CALC-01/02, dihitung saat response, tidak disimpan di DB)."
+            "description": "Detail 1 PR, termasuk pr_margin & pr_margin_percentage (dihitung saat response), pr_ref_previous_pr & previous_rfp_no (referensi rantai siklus pembayaran bertahap), serta pr_po_no."
           },
           "response": []
         },
@@ -2585,10 +2585,10 @@
                 "pr"
               ]
             },
-            "description": "Butuh akses 'create_pr'. PR dibuat berstatus 'draft'. Tanda tangan requester TIDAK lagi wajib pada tahap ini (baru diwajibkan & dipasang sebagai 'prepared by' saat Submit PR for Approval). Admin WAJIB tetap terhubung ke divisi (admin_ref_division) untuk pembuatan nomor RFP. po_amount & hpp opsional diisi di awal (estimasi); dapat direvisi lagi lewat 'Update PR Amounts (margin)'.",
+            "description": "Butuh akses 'create_pr'. PR dibuat berstatus 'draft'. Tanda tangan requester TIDAK wajib pada tahap ini (baru diwajibkan & dipasang sebagai 'prepared by' saat Submit PR for Approval). Admin WAJIB terhubung ke divisi (admin_ref_division) untuk pembuatan nomor RFP. po_amount & hpp opsional (estimasi awal), dapat direvisi lagi lewat 'Update PR Amounts (margin)'.\n\nBARU - ref_previous_pr (opsional): referensi ke PR sebelumnya dalam siklus pembayaran bertahap (mis. DP -> Progress -> Pelunasan). Divalidasi: harus milik requester yang sama, ref_responsible (CoA) harus SAMA (tidak boleh cross-responsible), boleh referensi PR yang belum completed, dan tidak boleh membentuk siklus.\n\nBARU - payments (opsional): rencana pembayaran awal, di-insert dalam SATU transaksi bersama PR. Payment yang disertakan di sini otomatis berstatus 'draft' (BUKAN 'pending') - baru diaktifkan otomatis jadi 'pending' saat PR ini mencapai status 'approved', supaya tidak muncul di antrean finance sebelum disetujui.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"ref_responsible\": \"{{responsible_id}}\",\n  \"description_item\": \"Pembelian ATK bulan Juli\",\n  \"sub_client\": \"\",\n  \"requested_amount\": 1500000,\n  \"po_amount\": 0,\n  \"hpp\": 0,\n  \"qout_no\": \"\",\n  \"target_invoice_date\": \"\"\n}",
+              "raw": "{\n  \"ref_responsible\": \"{{responsible_id}}\",\n  \"description_item\": \"Pembelian ATK bulan Juli\",\n  \"sub_client\": \"\",\n  \"requested_amount\": 1500000,\n  \"po_amount\": 0,\n  \"hpp\": 0,\n  \"qout_no\": \"\",\n  \"target_invoice_date\": \"\",\n  \"ref_previous_pr\": null,\n  \"payments\": [\n    {\n      \"stage\": \"down_payment\",\n      \"amount\": 500000,\n      \"type\": \"transfer\",\n      \"bank\": \"BCA\",\n      \"bank_account_no\": \"1234567890\",\n      \"bank_account_name\": \"PT Contoh Vendor\",\n      \"priority_date\": \"\"\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2630,10 +2630,10 @@
                 "{{pr_id}}"
               ]
             },
-            "description": "Butuh akses 'edit_pr'. Hanya boleh dilakukan oleh pemilik PR, dan hanya saat status PR 'draft' atau 'revision'.",
+            "description": "Butuh akses 'edit_pr'. Hanya boleh oleh pemilik PR, dan hanya saat status PR 'draft' atau 'revision'.\n\nBARU - ref_previous_pr (opsional) bisa diubah di sini juga, dengan validasi yang SAMA seperti Create PR (ownership, cross-responsible, deteksi siklus - kali ini pengecekan siklus juga memperhitungkan pr_id yang sedang diedit sebagai node terlarang).",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"ref_responsible\": \"{{responsible_id}}\",\n  \"description_item\": \"Pembelian ATK bulan Juli (revisi)\",\n  \"sub_client\": \"\",\n  \"requested_amount\": 1600000,\n  \"qout_no\": \"\",\n  \"target_invoice_date\": \"\"\n}",
+              "raw": "{\n  \"ref_responsible\": \"{{responsible_id}}\",\n  \"description_item\": \"Pembelian ATK bulan Juli (revisi)\",\n  \"sub_client\": \"\",\n  \"requested_amount\": 1600000,\n  \"qout_no\": \"\",\n  \"target_invoice_date\": \"\",\n  \"ref_previous_pr\": null\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2665,7 +2665,7 @@
                 "cancel"
               ]
             },
-            "description": "BARU. Membatalkan PR milik sendiri. Hanya bisa dilakukan requester (pr_ref_admin) selama PR masih berstatus draft, revision, atau submitted. PR yang sudah approved/completed/rejected/cancelled tidak bisa dibatalkan lewat endpoint ini (pembatalan setelah approved & belum lunas ditangani lewat 'Cancel PR Payment', karena status paid/unpaid diturunkan dari header T_Pr_Payment, bukan pr_status). Alasan pembatalan (notes) wajib diisi.",
+            "description": "Butuh akses 'cancel_pr'. Membatalkan PR milik sendiri. Hanya bisa dilakukan requester (pr_ref_admin) selama PR masih berstatus draft, revision, atau submitted. PR yang sudah approved/completed/rejected/cancelled tidak bisa dibatalkan lewat endpoint ini (pembatalan setelah approved & belum lunas ditangani lewat 'Cancel PR Payment', karena status paid/unpaid diturunkan dari header T_Pr_Payment, bukan pr_status). Alasan pembatalan (notes) wajib diisi.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"notes\": \"Kebutuhan dibatalkan oleh requester, tidak jadi dilanjutkan.\"\n}",
@@ -2695,7 +2695,7 @@
                 "documents"
               ]
             },
-            "description": "BARU. Daftar dokumen pendukung yang dilampirkan pada PR ini (mis. cost_control, quotation, invoice, contract, other)."
+            "description": "Daftar dokumen pendukung yang dilampirkan pada PR ini (mis. cost_control, quotation, invoice, contract, other)."
           },
           "response": []
         },
@@ -2716,7 +2716,7 @@
                 "documents"
               ]
             },
-            "description": "BARU. Butuh akses 'upload_pr_document'. Hanya requester pemilik PR yang boleh mengunggah. document_type harus salah satu dari: cost_control, quotation, invoice, contract, other (default 'other' jika dikosongkan). Wajib diisi 'cost_control' untuk PR dengan requested_amount > Rp 50.000.000 sebelum PR dapat disubmit. Format file: pdf, doc, docx, jpg, jpeg, png (maks 10MB).",
+            "description": "Butuh akses 'upload_pr_document'. Hanya requester pemilik PR yang boleh mengunggah. document_type harus salah satu dari: cost_control, quotation, invoice, contract, other (default 'other' jika dikosongkan). Wajib diisi 'cost_control' untuk PR dengan requested_amount > Rp 50.000.000 sebelum PR dapat disubmit. Format file: pdf, doc, docx, jpg, jpeg, png (maks 10MB).",
             "body": {
               "mode": "formdata",
               "formdata": [
@@ -2764,7 +2764,7 @@
                 "{{pr_doc_id}}"
               ]
             },
-            "description": "BARU. Hanya admin yang mengunggah dokumen tersebut yang boleh menghapusnya."
+            "description": "Butuh akses 'upload_pr_document'. Hanya admin yang mengunggah dokumen tersebut yang boleh menghapusnya."
           },
           "response": []
         },
@@ -2846,10 +2846,44 @@
                 "submit"
               ]
             },
-            "description": "Butuh akses 'submit_pr'. PR harus berstatus draft/revision dan dimiliki actor. BARU: requester WAJIB sudah memiliki tanda tangan terdaftar (lihat Admins > Upload My Signature) - tanda tangan terbaru dipasang sebagai 'prepared by' pada PR ini saat submit berhasil (dipindah dari Create PR). Level 1 wajib disertakan (maks 3 level). Jika requested_amount > Rp 50.000.000, dokumen bertipe cost_control wajib sudah diunggah lebih dulu lewat 'Upload PR Document'.",
+            "description": "Butuh akses 'submit_pr'. PR harus berstatus draft/revision dan dimiliki actor. Requester WAJIB sudah memiliki tanda tangan terdaftar (lihat Admins > Upload My Signature) - tanda tangan terbaru dipasang sebagai 'prepared by' pada PR ini saat submit berhasil. Level 1 wajib disertakan (maks 3 level). Jika requested_amount > Rp 50.000.000, dokumen bertipe cost_control wajib sudah diunggah lebih dulu lewat 'Upload PR Document'.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"approvers\": [\n    {\n      \"level\": 1,\n      \"type\": \"manager\",\n      \"admin_id\": \"{{admin_id}}\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Bulk Submit PR",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/pr/bulk-submit",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "pr",
+                "bulk-submit"
+              ]
+            },
+            "description": "BARU. Butuh akses 'submit_pr' (reuse, tanpa slug baru). Submit banyak PR sekaligus, diproses BEST-EFFORT per item - satu PR gagal disubmit TIDAK menghentikan pemrosesan PR lain dalam batch. Setiap item melalui validasi & business rule yang SAMA PERSIS dengan Submit PR for Approval single-item (ownership, status eligible, signature wajib, cost-control attachment, dst).\n\n'default_approvers' dipakai untuk item yang tidak menyertakan 'approvers' sendiri (override per-item). Maksimal 50 item per batch. Duplikat pr_id dalam satu batch ditolak di level validasi.\n\nResponse berupa array hasil per item: { pr_id, success, error? }.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"default_approvers\": [\n    {\n      \"level\": 1,\n      \"type\": \"manager\",\n      \"admin_id\": \"{{admin_id}}\"\n    }\n  ],\n  \"items\": [\n    { \"pr_id\": {{pr_id}} }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2881,7 +2915,7 @@
                 "priority"
               ]
             },
-            "description": "Butuh akses 'set_pr_priority'. BARU: sekarang hanya REQUESTER (pemilik PR / pr_ref_admin) yang boleh mengatur priority, bukan lagi approver level 1. priority: low | medium | high | urgent, atau string kosong untuk unset. Tidak dapat diatur selama PR masih berstatus draft.",
+            "description": "Butuh akses 'set_pr_priority'. Sekarang hanya REQUESTER (pemilik PR / pr_ref_admin) yang boleh mengatur priority, bukan lagi approver level 1. priority: low | medium | high | urgent, atau string kosong untuk unset. Tidak dapat diatur selama PR masih berstatus draft.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"priority\": \"high\"\n}",
@@ -2917,7 +2951,7 @@
                 "approve"
               ]
             },
-            "description": "Butuh akses 'approve_pr'. Approver WAJIB punya tanda tangan terdaftar. Sequential: level N baru bisa diputuskan setelah level N-1 approved pada round yang sama.",
+            "description": "Butuh akses 'approve_pr'. Approver WAJIB punya tanda tangan terdaftar. Sequential: level N baru bisa diputuskan setelah level N-1 approved pada round yang sama. Setelah level tertinggi yang di-assign approve, PR jadi 'approved' DAN seluruh payment berstatus 'draft' milik PR ini otomatis diaktifkan jadi 'pending'.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"notes\": \"Disetujui, sesuai anggaran.\"\n}",
@@ -2957,6 +2991,41 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"notes\": \"Anggaran tidak mencukupi.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Bulk Approve/Reject Approvals",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/pr/approvals/bulk-decide",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "pr",
+                "approvals",
+                "bulk-decide"
+              ]
+            },
+            "description": "BARU. Butuh akses 'approve_pr' (reuse, tanpa slug baru). Approve ATAU reject banyak baris approval sekaligus dengan 'decision' yang SAMA untuk seluruh item dalam batch. Diproses BEST-EFFORT per item - semua guard dari Approve/Reject single-item tetap berlaku penuh per baris (sequence violation, ownership, signature requirement, dst). Maksimal 50 item per batch. Duplikat approval_id dalam satu batch ditolak di level validasi.\n\nResponse berupa array hasil per item: { approval_id, success, error? }.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"decision\": \"approved\",\n  \"items\": [\n    { \"approval_id\": {{approval_id}}, \"notes\": \"Sesuai anggaran\" }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3065,7 +3134,7 @@
                 "request-revision"
               ]
             },
-            "description": "Butuh akses 'request_revision_pr'. HANYA approver level 1 atau 2 yang boleh meminta revisi (BR-REV-01..04, level >= 3/director ditolak). PR harus berstatus submitted.",
+            "description": "Butuh akses 'request_revision_pr'. HANYA approver level 1 atau 2 yang boleh meminta revisi (level >= 3/director ditolak). PR harus berstatus submitted.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"notes\": \"Tolong lampirkan RAB terbaru.\"\n}",
@@ -3079,7 +3148,7 @@
           "response": []
         },
         {
-          "name": "Update PR Amounts (margin)",
+          "name": "Update PR Amounts (margin & PO number)",
           "request": {
             "method": "POST",
             "header": [
@@ -3100,10 +3169,10 @@
                 "amounts"
               ]
             },
-            "description": "BARU (Slice G, BR-CALC-01/02). Butuh akses 'update_pr_amounts'. Hanya po_amount & hpp yang disimpan; pr_margin & pr_margin_percentage dihitung ulang saat response (margin = po_amount - hpp, margin_percentage = margin / po_amount * 100, aman terhadap pembagian nol). Catatan: siapa yang berwenang memanggil ini & pada status PR apa saja masih menunggu konfirmasi BR lebih lanjut.",
+            "description": "Butuh akses 'update_pr_amounts'. po_amount, hpp, dan po_no disimpan; pr_margin & pr_margin_percentage dihitung ulang saat response (margin = po_amount - hpp, margin_percentage = margin / po_amount, aman terhadap pembagian nol).\n\nBARU - po_no (opsional): nomor PO/SPK aktual dari klien. Kosongkan jika PO belum release dari klien - akan ditampilkan sebagai 'PO BELUM RELEASE' pada RFP export & laporan summary payment. Catatan: kolom ini untuk saat ini BELUM direlasikan formal ke tabel PO (masih string independen), karena ada kasus PO release sebelum PR dibuat - relasi resmi masih dalam tahap desain lebih lanjut.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"po_amount\": 12000000,\n  \"hpp\": 9500000\n}",
+              "raw": "{\n  \"po_amount\": 12000000,\n  \"hpp\": 9500000,\n  \"po_no\": \"SPK5330/00050.02/2025\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3198,7 +3267,7 @@
                 "confirm"
               ]
             },
-            "description": "Butuh akses 'confirm_pr_payment'. Maker-checker: admin yang mencatat pembayaran (input) tidak boleh sama dengan admin yang mengonfirmasi lunas (BR-PAY-01). Jika seluruh pembayaran PR sudah 'paid', status PR otomatis menjadi 'completed'."
+            "description": "Butuh akses 'confirm_pr_payment'. Maker-checker: admin yang mencatat pembayaran (input) tidak boleh sama dengan admin yang mengonfirmasi lunas. Menolak jika payment masih berstatus 'draft' (PR belum approved). Jika seluruh pembayaran PR sudah 'paid', status PR otomatis menjadi 'completed'."
           },
           "response": []
         },
@@ -3235,6 +3304,73 @@
                 }
               }
             }
+          },
+          "response": []
+        },
+        {
+          "name": "PR Payment Chain (Riwayat Rantai)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/pr/{{pr_id}}/payment-chain",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "pr",
+                "{{pr_id}}",
+                "payment-chain"
+              ]
+            },
+            "description": "BARU. Menelusuri pr_ref_previous_pr mundur dari PR ini, mengembalikan payment per tahap (mis. Pelunasan -> Progress -> DP), terurut PALING BARU ke PALING LAMA. Berguna bagi finance untuk melihat seluruh histori pembayaran lintas PR dalam satu siklus tanpa query manual per PR."
+          },
+          "response": []
+        },
+        {
+          "name": "Export PR Payment Summary (Finance)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/pr/payments/export?start_date=2026-01-01&end_date=2026-01-31&responsible={{responsible_id}}&status=paid&user={{admin_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "pr",
+                "payments",
+                "export"
+              ],
+              "query": [
+                {
+                  "key": "start_date",
+                  "value": "2026-01-01"
+                },
+                {
+                  "key": "end_date",
+                  "value": "2026-01-31"
+                },
+                {
+                  "key": "responsible",
+                  "value": "{{responsible_id}}",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": "paid",
+                  "disabled": true
+                },
+                {
+                  "key": "user",
+                  "value": "{{admin_id}}",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "BARU. Butuh akses 'export_pr_payment_report' (khusus finance). Mengembalikan file Summary_Payment_PR_<timestamp>.xlsx berisi seluruh payment sesuai filter, lengkap dengan kolom Total Pembayaran Sebelumnya (dihitung dari rantai pr_ref_previous_pr), Margin & %, NO. PO, serta baris subtotal per Responsible dan grand total (hanya menghitung payment berstatus 'paid').\n\nFilter:\n- start_date & end_date: wajib diisi BERSAMAAN, berdasarkan payment_create_date\n- responsible: filter pr_ref_responsible (opsional)\n- status: pending | paid | cancelled | draft (opsional, kosong = semua)\n- user: filter requester / pr_ref_admin (opsional)"
           },
           "response": []
         }
