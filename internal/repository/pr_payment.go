@@ -263,3 +263,50 @@ func (r *PRPaymentRepo) SumPaidBeforeInChain(ctx context.Context, prIDs []int, b
 	err := r.db.QueryRowContext(ctx, query, args...).Scan(&total)
 	return total, err
 }
+
+func (r *PRPaymentRepo) ReplaceDraftPayments(ctx context.Context, prID int, adminID string, payments []PRPaymentDraft) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM T_Pr_Payment WHERE payment_ref_pr = ? AND payment_status = 'draft'`, prID); err != nil {
+		return err
+	}
+
+	if len(payments) > 0 {
+		stmt, err := tx.PrepareContext(ctx, `
+			INSERT INTO T_Pr_Payment (payment_ref_pr, payment_ref_admin_input, payment_stage,
+			 payment_amount, payment_type, payment_bank, payment_bank_account_no,
+			 payment_bank_account_name, payment_priority_date, payment_status, payment_create_date)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', NOW())`)
+		if err != nil {
+			return err
+		}
+		defer stmt.Close()
+
+		for _, p := range payments {
+			var bank, bankNo, bankName, priorityDate interface{}
+			if p.Bank != "" {
+				bank = p.Bank
+			}
+			if p.BankAccountNo != "" {
+				bankNo = p.BankAccountNo
+			}
+			if p.BankAccountName != "" {
+				bankName = p.BankAccountName
+			}
+			if p.PriorityDate != "" {
+				priorityDate = p.PriorityDate
+			}
+			if _, err := stmt.ExecContext(ctx, prID, adminID, p.Stage, p.Amount, p.Type,
+				bank, bankNo, bankName, priorityDate); err != nil {
+				return err
+			}
+		}
+	}
+
+	return tx.Commit()
+}

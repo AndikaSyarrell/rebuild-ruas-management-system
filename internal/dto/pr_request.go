@@ -70,6 +70,7 @@ type UpdatePRRequest struct {
 	QoutNo            string          `json:"qout_no"`
 	TargetInvoiceDate string          `json:"target_invoice_date"`
 	RefPreviousPR     *utils.FlexInt  `json:"ref_previous_pr"` // BARU — bisa diedit
+	Payments []CreatePRPaymentRequest `json:"payments,omitempty"`
 }
 
 func (r UpdatePRRequest) RefPreviousPRPtr() *int {

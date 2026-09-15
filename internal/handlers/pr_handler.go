@@ -22,6 +22,7 @@ type PRHandler struct {
 	prService       *service.PRService
 	approvalService *service.PRApprovalService
 	exportService 	*service.PRExportService
+	paymentRepo *repository.PRPaymentRepo
 }
 
 func NewPRHandler(
@@ -213,6 +214,14 @@ func (h *PRHandler) Update(w http.ResponseWriter, r *http.Request) {
 		utils.Error(w, http.StatusConflict, "Purchase request hanya dapat diubah saat berstatus draft atau revision")
 		return
 	}
+		if current.RefAdmin != adminID {
+		utils.Error(w, http.StatusForbidden, "Anda hanya dapat mengubah purchase request milik sendiri")
+		return
+	}
+	if current.Status != "draft" && current.Status != "revision" {
+		utils.Error(w, http.StatusConflict, "Purchase request hanya dapat diubah saat berstatus draft atau revision")
+		return
+	}
 
 	if req.RefPreviousPR != nil {
 		err := h.prService.ValidatePreviousPRReference(r.Context(), adminID, int(req.RefResponsible), id, int(*req.RefPreviousPR))
@@ -232,6 +241,29 @@ func (h *PRHandler) Update(w http.ResponseWriter, r *http.Request) {
 			return
 		default:
 			utils.Error(w, http.StatusInternalServerError, "Gagal memvalidasi referensi purchase request")
+			return
+		}
+	}
+
+	if req.Payments != nil { // hanya proses kalau field disertakan di body
+		drafts := make([]repository.PRPaymentDraft, 0, len(req.Payments))
+		for _, p := range req.Payments {
+			priorityDate := ""
+			if p.PriorityDate != "" {
+				priorityDate = utils.ParseDateParam(p.PriorityDate)
+				if priorityDate == "" {
+					utils.Error(w, http.StatusBadRequest, "Tanggal prioritas salah satu payment tidak valid")
+					return
+				}
+			}
+			drafts = append(drafts, repository.PRPaymentDraft{
+				Stage: p.Stage, Amount: float64(p.Amount), Type: p.Type,
+				Bank: p.Bank, BankAccountNo: p.BankAccountNo, BankAccountName: p.BankAccountName,
+				PriorityDate: priorityDate,
+			})
+		}
+		if err := h.paymentRepo.ReplaceDraftPayments(r.Context(), id, adminID, drafts); err != nil {
+			utils.Error(w, http.StatusInternalServerError, "PR diperbarui, namun gagal memperbarui rencana pembayaran")
 			return
 		}
 	}
