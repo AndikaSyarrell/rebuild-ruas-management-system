@@ -8,7 +8,7 @@ info:
     butuh header `Authorization: Bearer <access_token>`. Endpoint mutating
     tertentu juga dibatasi RBAC lewat `access_slug` (lihat deskripsi
     masing-masing operasi).
-  version: "1.0.0"
+  version: "1.1.0"
   contact:
     name: RMS Backend
 servers:
@@ -53,6 +53,12 @@ tags:
     description: Siklus pembayaran PR setelah berstatus approved
   - name: PR Document
     description: Lampiran dokumen pada PR (mis. cost_control, quotation)
+  - name: PR Cancel
+    description: >
+      Pembatalan PR - langsung (sebelum lolos checker) atau lewat request
+      pembatalan + berita acara yang direview finance
+  - name: PO Quotation Link
+    description: Link/unlink grup quotation (kumpulan PR) ke PO, serta hint nomor quotation pada PO
   - name: Dashboard
   - name: Report
   - name: Health
@@ -936,6 +942,30 @@ paths:
         "409":
           description: Email sudah terdaftar
 
+  /api/admins/checkers:
+    get:
+      tags: [Admin]
+      summary: Daftar checker untuk dropdown submit PR (tanpa diri sendiri)
+      description: Admin aktif yang role-nya memiliki access_slug `checker`, selain admin yang login.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            admin_id: { type: string }
+                            admin_name: { type: string }
+                            division_title: { type: string }
+
   /api/admins/pic:
     get:
       tags: [Admin]
@@ -1487,13 +1517,19 @@ paths:
           description: Nomor PO sudah terdaftar
     delete:
       tags: [Purchase Order]
-      summary: Hapus PO (cascade ke item, dokumen, aktivitas)
-      description: "Butuh access_slug: `delete_po`"
+      summary: Hapus PO (cascade ke item, dokumen, aktivitas; link quotation dicabut otomatis)
+      description: >
+        Butuh access_slug: `delete_po`. Dalam satu transaksi: link quotation
+        ke PO ini dicabut, `pr_po_no` PR anggota dikosongkan, dan komentar
+        audit bertipe `po_unlink` dicatat pada tiap PR anggota sebelum PO
+        dihapus.
       responses:
         "200":
           $ref: "#/components/responses/OK"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
 
   /api/po/{id}/status:
     parameters:
@@ -1501,7 +1537,10 @@ paths:
     post:
       tags: [Purchase Order]
       summary: Ubah status PO
-      description: "Butuh access_slug: `change_stat_po`"
+      description: >
+        Butuh access_slug: `change_stat_po`. Mengubah status ke `cancel`
+        atau kembali ke `open` DITOLAK (409) selama PO masih ter-link ke
+        quotation - cabut link dulu lewat `unlink-quotation`.
       requestBody:
         required: true
         content:
@@ -1514,6 +1553,8 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "409":
+          description: PO masih ter-link ke quotation (untuk status cancel/open)
 
   /api/po/{id}/paid:
     parameters:
@@ -1650,6 +1691,118 @@ paths:
   # =========================================================
   # ACTIVITY
   # =========================================================
+  /api/po/{id}/quotation-candidates:
+    parameters:
+      - $ref: "#/components/parameters/PoIdPath"
+    get:
+      tags: [PO Quotation Link]
+      summary: Daftar quotation yang belum ter-link ke PO (kandidat link)
+      description: >
+        Butuh access_slug: `link_pr_po`. Maks 50 hasil. Bila `keyword`
+        kosong dan PO punya hint (`po_quot_no`), hint dipakai sebagai
+        keyword; bila hint tidak menemukan apa pun, seluruh kandidat
+        ditampilkan. `eligible` = minimal satu PR anggota berstatus
+        `completed` (syarat link).
+      parameters:
+        - name: keyword
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/QuotationCandidateResponse" }
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/po/{id}/link-quotation:
+    parameters:
+      - $ref: "#/components/parameters/PoIdPath"
+    post:
+      tags: [PO Quotation Link]
+      summary: Link grup quotation ke PO
+      description: >
+        Butuh access_slug: `link_pr_po`. Syarat: PO berstatus `prepared`
+        (service saat ini mensyaratkan persis `prepared`), quotation belum
+        ter-link ke PO lain, dan minimal satu PR anggota `completed`.
+        Dalam satu transaksi, `pr_po_no` seluruh PR anggota diisi dengan
+        nomor PO.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LinkQuotationRequest" }
+      responses:
+        "200":
+          $ref: "#/components/responses/OK"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: PO atau quotation tidak ditemukan
+        "409":
+          description: >
+            PO belum berstatus prepared, quotation sudah ter-link ke PO
+            (lain), atau belum ada PR anggota yang `completed`
+
+  /api/po/{id}/unlink-quotation:
+    parameters:
+      - $ref: "#/components/parameters/PoIdPath"
+    post:
+      tags: [PO Quotation Link]
+      summary: Cabut link quotation dari PO
+      description: >
+        Butuh access_slug: `unlink_pr_po`. `notes` WAJIB (audit trail
+        permanen: dicatat sebagai komentar bertipe `po_unlink` pada setiap
+        PR anggota). `pr_po_no` seluruh PR anggota dikosongkan.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UnlinkQuotationRequest" }
+      responses:
+        "200":
+          $ref: "#/components/responses/OK"
+        "400":
+          description: Validasi gagal, atau quotation tidak ter-link ke PO ini
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Quotation tidak ditemukan
+
+  /api/po/{id}/quot-hint:
+    parameters:
+      - $ref: "#/components/parameters/PoIdPath"
+    post:
+      tags: [PO Quotation Link]
+      summary: Set / hapus hint nomor quotation pada PO
+      description: >
+        Butuh access_slug: `edit_po`. Hint dinormalisasi (trim + uppercase);
+        kosong = hapus hint. Hanya petunjuk pencarian kandidat, bukan link.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateQuotHintRequest" }
+      responses:
+        "200":
+          $ref: "#/components/responses/OK"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /api/po/{id}/activities:
     parameters:
       - $ref: "#/components/parameters/PoIdPath"
@@ -1799,6 +1952,28 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+
+  /api/po/{id}/documents/{docId}/download:
+    parameters:
+      - $ref: "#/components/parameters/PoIdPath"
+      - name: docId
+        in: path
+        required: true
+        schema: { type: integer }
+    get:
+      tags: [Document]
+      summary: Unduh / tampilkan file dokumen PO
+      description: "Mengalirkan file dengan `Content-Disposition: inline`."
+      responses:
+        "200":
+          description: File dokumen
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          description: File dokumen kosong/rusak di server
 
   # =========================================================
   # RESPONSIBLE (Chart of Accounts)
@@ -1950,9 +2125,13 @@ paths:
       tags: [Purchase Request]
       summary: List purchase request
       description: >
-        Jika query `status` diisi, mengembalikan SELURUH baris berstatus
-        tsb tanpa paginasi (`paged: false`). Jika kosong, mengembalikan
-        hasil paginasi standar.
+        Hanya menampilkan PR yang boleh dilihat aktor: requester sendiri,
+        approver/pemutus pada PR tsb, admin finance yang mencatat/
+        mengonfirmasi pembayarannya, director (setelah level 1 approved),
+        dan finance (setelah level 2 approved atau bila ada request
+        pembatalan). Jika query `status` diisi, mengembalikan SELURUH baris
+        berstatus tsb tanpa paginasi (`data.paged: false`, daftar ada di
+        `data.data`). Jika kosong, mengembalikan hasil paginasi standar.
       parameters:
         - name: status
           in: query
@@ -1962,7 +2141,7 @@ paths:
         - $ref: "#/components/parameters/PerPage"
       responses:
         "200":
-          description: OK
+          description: OK (paginasi standar bila `status` kosong)
           content:
             application/json:
               schema:
@@ -1974,15 +2153,30 @@ paths:
                       data:
                         type: array
                         items: { $ref: "#/components/schemas/PRResponse" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
     post:
       tags: [Purchase Request]
       summary: Buat purchase request baru (status awal draft)
       description: >
         Butuh access_slug: `create_pr`. Admin pembuat WAJIB sudah terhubung
-        ke divisi (untuk penomoran RFP) - lihat `admin_ref_division`.
-        `payments` opsional: baris pembayaran yang sudah direncanakan di
-        muka, tersimpan berstatus `draft` dan baru aktif (`pending`) setelah
-        PR ini disetujui penuh.
+        ke divisi (untuk penomoran RFP: `<kode divisi>-<urut 3 digit><tahun>`).
+        `payments` opsional: baris pembayaran yang direncanakan di muka,
+        tersimpan berstatus `draft` dan baru aktif (`pending`) setelah PR
+        ini disetujui penuh.
+
+
+        **Quotation**: `qout_no` dinormalisasi (trim + uppercase). Bila
+        nomor sudah dipakai grup PR lain, server membalas 409 berisi
+        detail grup (`QuotationConflictResponse`); kirim ulang dengan
+        `confirm_join_quotation: true` untuk bergabung. Bila `ref_previous_pr`
+        sudah punya quotation, PR ini otomatis mewarisinya.
+
+
+        **Nomor PO** (`po_no`) ditentukan dengan prioritas: (1) PO yang
+        ter-link ke grup quotation, (2) nomor yang diisi requester (harus
+        ada di RMS dan berstatus prepared/progress/complete), (3) warisan
+        dari PR sebelumnya, (4) kosong -> ditampilkan "PO BELUM RELEASE".
       requestBody:
         required: true
         content:
@@ -2003,22 +2197,138 @@ paths:
                         properties:
                           pr_id: { type: integer }
         "400":
-          $ref: "#/components/responses/BadRequest"
+          description: >
+            Validasi gagal, PR referensi tidak ditemukan / beda responsible /
+            membentuk siklus, `qout_no` berbeda dengan quotation chain PR
+            sebelumnya, atau nomor PO tidak ditemukan di RMS
         "403":
           description: Referensi PR sebelumnya bukan milik admin ini
         "409":
           description: >
-            Admin belum terhubung ke divisi manapun, atau referensi PR
-            sebelumnya tidak valid (tidak ditemukan/beda responsible/siklus)
+            (a) Admin belum terhubung ke divisi; (b) nomor quotation sudah
+            dipakai grup lain - `data` berisi `QuotationConflictResponse`,
+            ulangi dengan `confirm_join_quotation: true`; (c) responsible
+            berbeda dengan responsible grup quotation; (d) PO tidak
+            berstatus prepared/progress/complete; (e) nomor PO berbeda
+            dengan PO yang ter-link ke grup quotation
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/QuotationConflictResponse" }
+
+  /api/pr/quotations:
+    get:
+      tags: [Purchase Request]
+      summary: Cari nomor quotation (autocomplete pada form PR)
+      description: >
+        Butuh access_slug: `create_pr`. Maks 10 hasil. `keyword` kosong
+        mengembalikan array kosong.
+      parameters:
+        - name: keyword
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/QuotationCandidateResponse" }
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/pr/po-options:
+    get:
+      tags: [Purchase Request]
+      summary: Daftar nomor PO yang dapat dipakai pada form PR
+      description: >
+        Hanya PO berstatus `prepared`, `progress`, atau `complete`. Pencarian
+        pada nomor PO, hint quotation, sub-client, nama klien, atau nama
+        produk item.
+
+
+        > **Catatan**: handler `SearchPOOptions` sudah ada, tetapi route ini
+        > belum terdaftar di `routes.go` - daftarkan `rt.Get("/po-options", ...)`
+        > pada grup `/pr` agar endpoint ini dapat diakses.
+      parameters:
+        - name: keyword
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 10, minimum: 1, maximum: 50 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/POLinkOptionResponse" }
+
+  /api/pr/link-check:
+    get:
+      tags: [Purchase Request]
+      summary: Validasi hubungan nomor quotation dan nomor PO pada form PR
+      description: >
+        Hasil validasi ada di `data.level` (`info` | `ok` | `warning` |
+        `error`) dan `data.code`, BUKAN di status HTTP - 200 berarti
+        pemeriksaan berhasil dijalankan. Juga mengembalikan responsible
+        (CoA) yang harus dikunci (`data.responsible`) berdasarkan anggota
+        grup quotation / PO.
+
+
+        > **Catatan**: handler `CheckLink` sudah ada, tetapi route ini belum
+        > terdaftar di `routes.go` - daftarkan `rt.Get("/link-check", ...)`
+        > pada grup `/pr`.
+      parameters:
+        - name: qout_no
+          in: query
+          schema: { type: string }
+        - name: po_no
+          in: query
+          schema: { type: string }
+        - name: exclude_pr_id
+          in: query
+          description: PR yang sedang diedit (tidak dihitung saat menentukan responsible grup)
+          schema: { type: integer }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/LinkCheckResponse" }
 
   /api/pr/my-approvals:
     get:
       tags: [PR Approval]
       summary: Daftar baris approval yang menunggu keputusan admin ini
       description: >
-        Hanya baris level 1, atau level > 1 yang level sebelumnya (round
-        sama) sudah `approved` - approval yang belum "gilirannya" tidak
-        ikut muncul.
+        Hanya baris pada round terbaru PR berstatus `submitted`, dan hanya
+        yang sudah "gilirannya" (level 1, atau level sebelumnya `approved`).
+        Level 1 = checker yang ditugaskan; level 2/3 = admin aktif yang
+        memegang access_slug sesuai `approval_type` (director/finance) dan
+        bukan requester PR tsb.
       responses:
         "200":
           description: OK
@@ -2033,12 +2343,250 @@ paths:
                         type: array
                         items: { $ref: "#/components/schemas/PRApprovalResponse" }
 
+  /api/pr/my-decisions:
+    get:
+      tags: [PR Approval]
+      summary: Riwayat keputusan approval yang sudah dibuat admin ini
+      parameters:
+        - name: decision
+          in: query
+          schema: { type: string, enum: [approved, rejected, revision_requested] }
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PerPage"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - $ref: "#/components/schemas/PaginationMeta"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/PRDecisionHistoryResponse" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/pr/bulk-submit:
+    post:
+      tags: [Purchase Request]
+      summary: Submit banyak PR sekaligus (maks 50)
+      description: >
+        Butuh access_slug: `submit_pr`. Tiap item diproses mandiri dengan
+        aturan yang sama seperti `POST /api/pr/{id}/submit`; kegagalan satu
+        item tidak membatalkan item lain. Hasil per item ada di `data`.
+        `checker_id` per item menimpa `default_checker_id`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BulkSubmitPRRequest" }
+      responses:
+        "200":
+          description: Bulk submit selesai (lihat `success` per item)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/BulkSubmitResult" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/pr/approvals/bulk-decide:
+    post:
+      tags: [PR Approval]
+      summary: Approve / reject banyak baris approval sekaligus (maks 50)
+      description: >
+        Butuh salah satu access_slug: `checker`, `director`, `finance`.
+        Aturan per item sama seperti approve/reject tunggal (sequential,
+        tanda tangan wajib untuk approve, reject hanya level 1).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BulkDecideApprovalRequest" }
+      responses:
+        "200":
+          description: Bulk selesai (lihat `success` per item)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/BulkDecideResult" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/pr/cancel-requests:
+    get:
+      tags: [PR Cancel]
+      summary: Antrean review request pembatalan (finance)
+      description: >
+        Butuh access_slug: `finance`. Default `status=pending`. Pending
+        selalu di atas (terlama dulu), sisanya terbaru dulu.
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [pending, approved, rejected, all], default: pending }
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PerPage"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - $ref: "#/components/schemas/PaginationMeta"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/PRCancelRequestResponse" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/pr/cancel-requests/{cancelId}/document:
+    parameters:
+      - name: cancelId
+        in: path
+        required: true
+        schema: { type: integer }
+    get:
+      tags: [PR Cancel]
+      summary: Lihat berita acara request pembatalan
+      description: Hanya pengaju request atau admin dengan access_slug `finance`. Dikirim inline.
+      responses:
+        "200":
+          description: File berita acara
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/pr/cancel-requests/{cancelId}/approve:
+    parameters:
+      - name: cancelId
+        in: path
+        required: true
+        schema: { type: integer }
+    post:
+      tags: [PR Cancel]
+      summary: Setujui request pembatalan (finance)
+      description: >
+        Butuh access_slug: `finance`. Dalam satu transaksi: request ->
+        `approved`, payment `draft`/`pending` -> `cancelled`, PR ->
+        `cancelled`, riwayat status dicatat. Finance tidak boleh mereview
+        request miliknya sendiri; PR dengan pembayaran `paid` tidak dapat
+        dibatalkan.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PRCancelReviewRequest" }
+      responses:
+        "200":
+          $ref: "#/components/responses/OK"
+        "403":
+          description: Finance tidak dapat mereview request miliknya sendiri
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Request sudah direview, status PR tidak memungkinkan pembatalan, atau ada pembayaran lunas
+
+  /api/pr/cancel-requests/{cancelId}/reject:
+    parameters:
+      - name: cancelId
+        in: path
+        required: true
+        schema: { type: integer }
+    post:
+      tags: [PR Cancel]
+      summary: Tolak request pembatalan (finance)
+      description: "Butuh access_slug: `finance`. `notes` (alasan penolakan) WAJIB, maks 500 karakter."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PRCancelReviewRequest" }
+      responses:
+        "200":
+          $ref: "#/components/responses/OK"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          description: Finance tidak dapat mereview request miliknya sendiri
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Request sudah direview
+
+  /api/pr/payments/export:
+    get:
+      tags: [PR Payment]
+      summary: Export summary payment PR (.xlsx)
+      description: >
+        Butuh access_slug: `export_pr_payment_report`. `start_date` dan
+        `end_date` harus diisi bersamaan (filter pada tanggal dibuatnya
+        payment). Subtotal per responsible hanya menghitung payment `paid`.
+      parameters:
+        - name: start_date
+          in: query
+          schema: { type: string, format: date }
+        - name: end_date
+          in: query
+          schema: { type: string, format: date }
+        - name: status
+          in: query
+          schema: { type: string, enum: [pending, paid, cancelled, draft] }
+        - name: responsible
+          in: query
+          description: ID responsible (CoA)
+          schema: { type: integer }
+        - name: user
+          in: query
+          description: admin_id requester PR
+          schema: { type: string }
+      responses:
+        "200":
+          description: File xlsx
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema: { type: string, format: binary }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
   /api/pr/{id}:
     parameters:
       - $ref: "#/components/parameters/IdPathInt"
     get:
       tags: [Purchase Request]
       summary: Detail purchase request
+      description: Hanya admin yang boleh melihat PR ini (lihat aturan visibilitas pada `GET /api/pr`).
       responses:
         "200":
           description: OK
@@ -2050,6 +2598,8 @@ paths:
                   - type: object
                     properties:
                       data: { $ref: "#/components/schemas/PRResponse" }
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
     put:
@@ -2058,6 +2608,12 @@ paths:
       description: >
         Butuh access_slug: `edit_pr`. Hanya requester pemilik yang boleh
         mengubah, dan hanya selama status `draft` atau `revision`.
+
+
+        Nomor quotation terkunci setelah PR tergabung ke grup quotation.
+        `po_no`: tidak dikirim = tidak diubah; string kosong = dihapus.
+        `payments`: bila dikirim, menggantikan seluruh rencana pembayaran
+        berstatus `draft`; bila tidak dikirim, tidak diubah.
       requestBody:
         required: true
         content:
@@ -2074,8 +2630,10 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           description: >
-            PR sudah tidak berstatus draft/revision, atau referensi PR
-            sebelumnya tidak valid
+            PR bukan draft/revision; nomor quotation sudah terkunci; nomor
+            quotation dipakai grup lain (`data` = `QuotationConflictResponse`,
+            ulangi dengan `confirm_join_quotation: true`); responsible
+            berbeda dengan grup quotation; atau validasi nomor PO gagal
 
   /api/pr/{id}/export:
     parameters:
@@ -2102,12 +2660,17 @@ paths:
     parameters:
       - $ref: "#/components/parameters/IdPathInt"
     post:
-      tags: [Purchase Request]
-      summary: Batalkan purchase request
+      tags: [PR Cancel]
+      summary: Batalkan purchase request secara langsung
       description: >
-        Hanya requester pemilik yang boleh membatalkan, dan hanya selama
-        status `draft`, `revision`, atau `submitted`. PR yang sudah
-        `approved`/`completed`/`rejected`/`cancelled` dianggap final.
+        Hanya requester pemilik. Pembatalan LANGSUNG hanya bila PR belum
+        lolos checker: status `draft`, `revision`, atau `submitted` dengan
+        level 1 belum `approved` pada round berjalan.
+
+
+        Bila checker sudah approve (atau PR sudah `approved`), server
+        membalas 409 dengan `data.code = "cancel_request_required"` -
+        gunakan `POST /api/pr/{id}/cancel-request`.
       requestBody:
         required: true
         content:
@@ -2123,7 +2686,80 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
-          description: PR sudah pada status final dan tidak dapat dibatalkan
+          description: >
+            PR sudah final (completed/rejected/cancelled), atau perlu request
+            pembatalan (`data.code = "cancel_request_required"`)
+
+  /api/pr/{id}/cancel-request:
+    parameters:
+      - $ref: "#/components/parameters/IdPathInt"
+    post:
+      tags: [PR Cancel]
+      summary: Ajukan request pembatalan (PR sudah lolos checker)
+      description: >
+        Multipart/form-data. `file` = berita acara (pdf/doc/docx/jpg/jpeg/png,
+        maks 10MB, magic number divalidasi) dan `reason` = ringkasan alasan
+        (maks 1200 karakter). Hanya requester pemilik; hanya untuk PR
+        `submitted` (level 1 sudah approved) atau `approved`. Request
+        menunggu review finance; hanya boleh ada satu request `pending`
+        per PR.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, reason]
+              properties:
+                file: { type: string, format: binary }
+                reason: { type: string, maxLength: 1200 }
+      responses:
+        "201":
+          description: Request pembatalan berhasil diajukan
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          cancel_id: { type: integer }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          description: Bukan pemilik PR
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: >
+            PR sudah final; PR masih dapat dibatalkan langsung
+            (`data.code = "cancel_direct_allowed"`); atau sudah ada request
+            yang menunggu review
+
+  /api/pr/{id}/cancel-requests:
+    parameters:
+      - $ref: "#/components/parameters/IdPathInt"
+    get:
+      tags: [PR Cancel]
+      summary: Riwayat request pembatalan untuk satu PR
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/PRCancelRequestResponse" }
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
   /api/pr/{id}/history:
     parameters:
@@ -2132,6 +2768,8 @@ paths:
       tags: [Purchase Request]
       summary: Riwayat perubahan status PR
       responses:
+        "403":
+          description: Admin tidak boleh melihat PR ini
         "200":
           description: OK
           content:
@@ -2153,6 +2791,8 @@ paths:
       summary: Daftar seluruh baris approval PR (lintas round)
       description: Terurut round terbaru dahulu lalu level ascending.
       responses:
+        "403":
+          description: Admin tidak boleh melihat PR ini
         "200":
           description: OK
           content:
@@ -2173,11 +2813,17 @@ paths:
       tags: [Purchase Request]
       summary: Submit PR untuk approval
       description: >
-        Butuh access_slug: `submit_pr`. Mensyaratkan requester punya tanda
-        tangan terdaftar (dipakai sebagai "prepared by"); approver level 1
-        wajib disertakan; PR dengan `requested_amount` di atas Rp
-        50.000.000 wajib sudah melampirkan dokumen bertipe `cost_control`.
-        Hanya berlaku dari status `draft` atau `revision`.
+        Butuh access_slug: `submit_pr`. Requester memilih SATU checker
+        (level 1) dan tanda tangannya sendiri (`signature_id`). Level 2
+        (`director`) dan level 3 (`finance`) dibuat otomatis tanpa
+        penugasan orang tertentu - siapa pun yang memegang slug tsb
+        (selain requester) dapat memutuskan.
+
+
+        Syarat: checker aktif & punya slug `checker` serta bukan requester;
+        tanda tangan milik requester; `requested_amount` di atas Rp
+        50.000.000 wajib sudah melampirkan dokumen `cost_control`. Hanya
+        dari status `draft` atau `revision`; tiap submit membuat round baru.
       requestBody:
         required: true
         content:
@@ -2187,58 +2833,32 @@ paths:
         "200":
           $ref: "#/components/responses/OK"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          description: Validasi gagal, checker tidak valid, atau checker = requester
         "403":
-          description: PR bukan milik admin yang login
+          description: PR atau tanda tangan bukan milik admin yang login
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
           description: >
-            PR tidak eligible untuk submit, level approval sudah pernah
-            dibuat untuk round ini, requester belum punya tanda tangan
-            terdaftar, atau dokumen cost_control wajib belum dilampirkan
-
-  /api/pr/{id}/priority:
-    parameters:
-      - $ref: "#/components/parameters/IdPathInt"
-    post:
-      tags: [Purchase Request]
-      summary: Atur priority PR
-      description: >
-        Butuh access_slug: `set_pr_priority`. Hanya approver level 1 pada
-        round approval TERBARU PR ini yang boleh mengatur priority, dan
-        tidak dapat diatur selama PR masih berstatus `draft`.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: "#/components/schemas/SetPriorityRequest" }
-      responses:
-        "200":
-          $ref: "#/components/responses/OK"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "403":
-          description: Bukan approver level 1 pada round terbaru
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "409":
-          description: >
-            Priority tidak dapat diatur selama draft, atau baris approval
-            level 1 belum tersedia (PR belum pernah disubmit)
+            PR tidak eligible untuk submit, requester belum punya tanda
+            tangan terdaftar, atau dokumen cost_control wajib belum dilampirkan
 
   /api/pr/{id}/amounts:
     parameters:
       - $ref: "#/components/parameters/IdPathInt"
     post:
       tags: [Purchase Request]
-      summary: Perbarui nominal PO amount & HPP (margin dihitung otomatis)
+      summary: Perbarui nominal PO amount, HPP, dan nomor PO (margin dihitung otomatis)
       description: >
-        Butuh access_slug: `update_pr_amounts`. Hanya `po_amount` dan `hpp`
-        yang disimpan; `pr_margin` (= po_amount - hpp) dan
+        Butuh access_slug: `update_pr_amounts`. `po_amount` dan `hpp`
+        disimpan; `pr_margin` (= po_amount - hpp) dan
         `pr_margin_percentage` (= margin / po_amount * 100, aman terhadap
-        pembagian nol) SELALU dihitung ulang saat response, tidak pernah
-        disimpan sebagai kolom terpisah.
+        pembagian nol) SELALU dihitung ulang saat response.
+
+
+        `po_no` opsional: kosong = nomor PO tidak diubah. Bila PR sudah
+        tergabung ke grup quotation yang ter-link ke PO, `po_no` tidak
+        boleh diubah lewat endpoint ini (409) - ubah lewat proses linking PO.
       requestBody:
         required: true
         content:
@@ -2246,7 +2866,7 @@ paths:
             schema: { $ref: "#/components/schemas/UpdatePRAmountsRequest" }
       responses:
         "200":
-          description: Nominal berhasil diperbarui
+          description: OK
           content:
             application/json:
               schema:
@@ -2261,6 +2881,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          description: PR sudah ter-link ke PO lewat quotation
 
   /api/pr/{id}/comments:
     parameters:
@@ -2319,11 +2941,14 @@ paths:
       tags: [PR Approval]
       summary: Setujui baris approval
       description: >
-        Butuh access_slug: `approve_pr`. Mensyaratkan sequential (level N
-        baru bisa diputuskan setelah level N-1 pada round yang sama
-        `approved`) dan approver punya tanda tangan terdaftar. Jika ini
-        adalah level tertinggi pada round tsb, PR otomatis berpindah ke
-        status `approved` dan payment draft (jika ada) diaktifkan.
+        Butuh salah satu access_slug: `checker`, `director`, `finance`.
+        Level 1 hanya boleh oleh checker yang ditugaskan; level 2/3 oleh
+        admin yang memegang slug sesuai `approval_type` dan bukan requester.
+        Sequential (level N baru bisa diputuskan setelah level N-1 pada
+        round yang sama `approved`) dan approver harus punya tanda tangan
+        terdaftar (tanda tangan TERBARU dipakai). Jika ini level tertinggi
+        pada round tsb, PR otomatis `approved` dan payment draft diaktifkan
+        (`pending`).
       requestBody:
         required: false
         content:
@@ -2333,14 +2958,15 @@ paths:
         "200":
           $ref: "#/components/responses/OK"
         "403":
-          description: Baris approval ini bukan milik admin yang login
+          description: >
+            Baris approval bukan milik admin ini, tidak punya akses untuk
+            tahap ini, atau approver = requester
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
           description: >
-            Approval level sebelumnya belum disetujui, PR sudah tidak
-            berstatus submitted, atau approver belum punya tanda tangan
-            terdaftar
+            Level sebelumnya belum disetujui, PR tidak lagi `submitted`,
+            baris sudah diputuskan, atau approver belum punya tanda tangan
 
   /api/pr/approvals/{approvalId}/reject:
     parameters:
@@ -2350,10 +2976,11 @@ paths:
         schema: { type: integer }
     post:
       tags: [PR Approval]
-      summary: Tolak baris approval
+      summary: Tolak baris approval (hanya tahap checker / level 1)
       description: >
-        Butuh access_slug: `approve_pr`. PR langsung berpindah ke status
-        `rejected` begitu satu level manapun menolak.
+        Butuh salah satu access_slug: `checker`, `director`, `finance`.
+        Reject HANYA boleh pada level 1 (checker); level 2/3 membalas 403.
+        PR langsung berpindah ke status `rejected`.
       requestBody:
         required: false
         content:
@@ -2363,11 +2990,11 @@ paths:
         "200":
           $ref: "#/components/responses/OK"
         "403":
-          description: Baris approval ini bukan milik admin yang login
+          description: Baris approval bukan milik admin ini, atau reject tidak diizinkan pada level ini
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
-          description: Approval level sebelumnya belum disetujui, atau PR sudah tidak berstatus submitted
+          description: PR tidak lagi `submitted`, atau baris sudah diputuskan
 
   /api/pr/approvals/{approvalId}/request-revision:
     parameters:
@@ -2377,11 +3004,10 @@ paths:
         schema: { type: integer }
     post:
       tags: [PR Approval]
-      summary: Minta revisi PR
+      summary: Minta revisi PR (hanya checker / level 1)
       description: >
-        Butuh access_slug: `request_revision_pr`. Hanya approver level 1
-        atau 2 yang berwenang meminta revisi (level 3/director tidak
-        boleh). PR berpindah ke status `revision`.
+        Butuh access_slug: `request_revision_pr`. Hanya checker level 1
+        yang ditugaskan pada baris tsb. PR berpindah ke status `revision`.
       requestBody:
         required: true
         content:
@@ -2391,13 +3017,11 @@ paths:
         "200":
           $ref: "#/components/responses/OK"
         "403":
-          description: >
-            Baris approval ini bukan milik admin yang login, atau level ini
-            (director) tidak berwenang meminta revisi
+          description: Baris approval bukan milik admin ini, atau level ini tidak berwenang meminta revisi
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
-          description: Approval level sebelumnya belum disetujui, atau PR sudah tidak berstatus submitted
+          description: PR tidak lagi `submitted`, atau baris sudah diputuskan
 
   /api/pr/{id}/documents:
     parameters:
@@ -2406,6 +3030,8 @@ paths:
       tags: [PR Document]
       summary: Daftar dokumen lampiran PR
       responses:
+        "403":
+          description: Admin tidak boleh melihat PR ini
         "200":
           description: OK
           content:
@@ -2544,6 +3170,8 @@ paths:
       tags: [PR Payment]
       summary: Daftar pembayaran PR ini
       responses:
+        "403":
+          description: Admin tidak boleh melihat PR ini
         "200":
           description: OK
           content:
@@ -2561,7 +3189,8 @@ paths:
       summary: Catat tahap pembayaran baru
       description: >
         Butuh access_slug: `create_pr_payment`. PR harus sudah berstatus
-        `approved` sebelum pembayarannya dapat dicatat.
+        `approved` sebelum pembayarannya dapat dicatat. Pembayaran baru
+        berstatus `pending`.
       requestBody:
         required: true
         content:
@@ -2601,6 +3230,8 @@ paths:
         mengembalikan pembayaran tiap tahap dalam rantai tsb, terguna untuk
         PR lanjutan yang mereferensikan PR-PR sebelumnya (mis. termin).
       responses:
+        "403":
+          description: Admin tidak boleh melihat PR ini
         "200":
           description: OK
           content:
@@ -2664,6 +3295,36 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           description: Pembayaran yang sudah lunas atau sudah dibatalkan tidak dapat diproses lagi
+
+  /api/pr/payments/{paymentId}/priority-date:
+    parameters:
+      - name: paymentId
+        in: path
+        required: true
+        schema: { type: integer }
+    post:
+      tags: [PR Payment]
+      summary: Atur tanggal prioritas pembayaran
+      description: >
+        Butuh access_slug: `finance`. Hanya untuk pembayaran berstatus
+        `pending`. `priority_date` kosong = hapus tanggal prioritas. Aktor
+        harus boleh melihat PR pemilik pembayaran.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SetPaymentPriorityDateRequest" }
+      responses:
+        "200":
+          $ref: "#/components/responses/OK"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Pembayaran tidak berstatus pending
 
   # =========================================================
   # DASHBOARD
@@ -3236,6 +3897,7 @@ components:
         username: { type: string }
         role_id: { type: integer, nullable: true }
         region_id: { type: integer }
+        division_id: { type: integer, nullable: true }
         pic: { type: string, enum: [yes, "no"], default: "no" }
         pic_client: { type: string, enum: [yes, "no"], default: "no" }
 
@@ -3247,6 +3909,7 @@ components:
         username: { type: string }
         role_id: { type: integer, nullable: true }
         region_id: { type: integer }
+        division_id: { type: integer, nullable: true }
         pic: { type: string, enum: [yes, "no"] }
         pic_client: { type: string, enum: [yes, "no"] }
 
@@ -3266,6 +3929,8 @@ components:
         role_title: { type: string }
         admin_ref_region: { type: integer }
         region_title: { type: string }
+        admin_ref_division: { type: integer, nullable: true }
+        division_title: { type: string }
         admin_img: { type: string }
         admin_img_thmb: { type: string }
         admin_create_date: { type: string, format: date-time }
@@ -3342,6 +4007,9 @@ components:
         client_phone: { type: string }
         client_address: { type: string }
         sub_client: { type: string }
+        quot_no:
+          type: string
+          description: Opsional. Hint nomor quotation (dinormalisasi trim + uppercase)
         items:
           type: array
           minItems: 1
@@ -3433,6 +4101,13 @@ components:
         po_ppn_amount: { type: number, format: double }
         po_total: { type: number, format: double }
         po_item_total: { type: integer }
+        po_quot_no: { type: string, description: Hint nomor quotation }
+        region_id: { type: integer }
+        pic_id: { type: string }
+        pic_client_id: { type: string }
+        division_id: { type: integer, nullable: true }
+        ppn_id: { type: integer }
+        client_id: { type: integer }
         client_name: { type: string }
         client_email: { type: string }
         client_phone: { type: string }
@@ -3458,6 +4133,10 @@ components:
         items:
           type: array
           items: { $ref: "#/components/schemas/POItemResponse" }
+        linked_quotations:
+          type: array
+          description: Grup quotation yang sudah ter-link ke PO ini
+          items: { $ref: "#/components/schemas/LinkedQuotationResponse" }
 
     POListItemResponse:
       type: object
@@ -3598,8 +4277,24 @@ components:
         requested_amount: { type: number, format: double, minimum: 0 }
         po_amount: { type: number, format: double, minimum: 0 }
         hpp: { type: number, format: double, minimum: 0 }
-        qout_no: { type: string }
+        qout_no:
+          type: string
+          description: Nomor quotation (dinormalisasi trim + uppercase)
         target_invoice_date: { type: string, format: date }
+        priority:
+          type: string
+          enum: [low, medium, high]
+          default: medium
+        po_no:
+          type: string
+          maxLength: 196
+          description: >
+            Nomor PO (opsional). Harus ada di RMS dengan status prepared/
+            progress/complete; bila grup quotation sudah ter-link ke PO,
+            harus sama dengan PO tsb.
+        confirm_join_quotation:
+          type: boolean
+          description: Set true untuk bergabung ke grup quotation yang sudah dipakai PR lain
         ref_previous_pr:
           type: integer
           nullable: true
@@ -3622,43 +4317,86 @@ components:
         qout_no: { type: string }
         target_invoice_date: { type: string, format: date }
         ref_previous_pr: { type: integer, nullable: true }
-
-    ApproverAssignmentRequest:
-      type: object
-      required: [level, type, admin_id]
-      properties:
-        level: { type: integer, minimum: 1, maximum: 3 }
-        type:
+        confirm_join_quotation: { type: boolean }
+        po_no:
           type: string
-          example: "manager"
-          description: "mis. manager/finance/director"
-        admin_id: { type: string }
+          nullable: true
+          maxLength: 196
+          description: Tidak dikirim = tidak diubah; string kosong = hapus nomor PO
+        payments:
+          type: array
+          description: Bila dikirim, menggantikan seluruh rencana pembayaran berstatus draft
+          items: { $ref: "#/components/schemas/CreatePRPaymentRequest" }
 
     SubmitPRRequest:
       type: object
-      required: [approvers]
+      required: [checker_id, signature_id]
       properties:
-        approvers:
+        checker_id:
+          type: string
+          description: admin_id checker level 1 (lihat GET /api/admins/checkers)
+        signature_id:
+          type: integer
+          description: ID tanda tangan milik requester (lihat GET /api/admins/me/signature)
+
+    BulkSubmitPRItem:
+      type: object
+      required: [pr_id]
+      properties:
+        pr_id: { type: integer }
+        checker_id:
+          type: string
+          description: Menimpa default_checker_id untuk PR ini
+
+    BulkSubmitPRRequest:
+      type: object
+      required: [signature_id, items]
+      properties:
+        signature_id: { type: integer }
+        default_checker_id: { type: string }
+        items:
           type: array
           minItems: 1
-          maxItems: 3
-          description: >
-            Level tidak boleh duplikat dan approver level 1 wajib
-            disertakan.
-          items: { $ref: "#/components/schemas/ApproverAssignmentRequest" }
+          maxItems: 50
+          description: pr_id tidak boleh duplikat; tiap item butuh checker_id atau default_checker_id
+          items: { $ref: "#/components/schemas/BulkSubmitPRItem" }
+
+    BulkSubmitResult:
+      type: object
+      properties:
+        pr_id: { type: integer }
+        success: { type: boolean }
+        error: { type: string }
 
     DecidePRApprovalRequest:
       type: object
       properties:
         notes: { type: string }
 
-    SetPriorityRequest:
+    BulkApprovalItem:
+      type: object
+      required: [approval_id]
+      properties:
+        approval_id: { type: integer }
+        notes: { type: string }
+
+    BulkDecideApprovalRequest:
+      type: object
+      required: [decision, items]
+      properties:
+        decision: { type: string, enum: [approved, rejected] }
+        items:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items: { $ref: "#/components/schemas/BulkApprovalItem" }
+
+    BulkDecideResult:
       type: object
       properties:
-        priority:
-          type: string
-          enum: [low, medium, high, urgent, ""]
-          description: Kosongkan untuk unset priority
+        approval_id: { type: integer }
+        success: { type: boolean }
+        error: { type: string }
 
     PRCommentRequest:
       type: object
@@ -3675,6 +4413,9 @@ components:
       properties:
         po_amount: { type: number, format: double, minimum: 0 }
         hpp: { type: number, format: double, minimum: 0 }
+        po_no:
+          type: string
+          description: Opsional; kosong = nomor PO tidak diubah
 
     CancelPRPaymentRequest:
       type: object
@@ -3682,11 +4423,160 @@ components:
       properties:
         notes: { type: string }
 
+    SetPaymentPriorityDateRequest:
+      type: object
+      properties:
+        priority_date:
+          type: string
+          format: date
+          description: Kosong = hapus tanggal prioritas
+
     CancelPRRequest:
       type: object
       required: [notes]
       properties:
         notes: { type: string }
+
+    PRCancelReviewRequest:
+      type: object
+      properties:
+        notes:
+          type: string
+          maxLength: 500
+          description: Wajib saat reject
+
+    # --- quotation / PO linking ---
+    LinkQuotationRequest:
+      type: object
+      required: [quotation_id]
+      properties:
+        quotation_id: { type: integer }
+
+    UnlinkQuotationRequest:
+      type: object
+      required: [quotation_id, notes]
+      properties:
+        quotation_id: { type: integer }
+        notes: { type: string, description: Alasan pencabutan (audit trail) }
+
+    UpdateQuotHintRequest:
+      type: object
+      properties:
+        quot_no: { type: string, description: Kosong = hapus hint }
+
+    QuotationMemberResponse:
+      type: object
+      properties:
+        pr_id: { type: integer }
+        rfp_no: { type: string }
+        pr_status: { type: string }
+
+    QuotationConflictResponse:
+      type: object
+      properties:
+        quotation_id: { type: integer }
+        quotation_no: { type: string }
+        linked_po: { type: string, description: "Kosong bila grup belum ter-link ke PO" }
+        members:
+          type: array
+          items: { $ref: "#/components/schemas/QuotationMemberResponse" }
+
+    QuotationCandidateResponse:
+      type: object
+      properties:
+        quotation_id: { type: integer }
+        quotation_no: { type: string }
+        quotation_create_date: { type: string, format: date-time }
+        eligible:
+          type: boolean
+          description: true bila minimal satu PR anggota berstatus completed
+        linked_po_no: { type: string }
+        members:
+          type: array
+          items: { $ref: "#/components/schemas/QuotationMemberResponse" }
+
+    LinkedQuotationResponse:
+      type: object
+      properties:
+        quotation_id: { type: integer }
+        quotation_no: { type: string }
+        quotation_link_ref_admin: { type: string }
+        quotation_link_date: { type: string, format: date-time }
+        members:
+          type: array
+          items: { $ref: "#/components/schemas/QuotationMemberResponse" }
+
+    POLinkOptionResponse:
+      type: object
+      properties:
+        po_id: { type: string }
+        po_order_num: { type: string }
+        po_status: { type: string }
+        po_subclient: { type: string }
+        client_name: { type: string }
+        po_quot_no: { type: string }
+        linked_quotation_nos:
+          type: array
+          items: { type: string }
+
+    LinkCheckPOResponse:
+      type: object
+      properties:
+        po_id: { type: string }
+        po_order_num: { type: string }
+        po_status: { type: string }
+        po_subclient: { type: string }
+        linked_quotation_nos:
+          type: array
+          items: { type: string }
+
+    ResponsibleRefResponse:
+      type: object
+      properties:
+        responsible_id: { type: integer }
+        responsible_name: { type: string }
+        responsible_coa_code: { type: string }
+
+    LinkCheckResponse:
+      type: object
+      properties:
+        level: { type: string, enum: [info, ok, warning, error] }
+        code:
+          type: string
+          description: "empty | po_not_found | po_not_linkable | not_linked | linked_other_po | linked_match | po_only | quotation_linked"
+        message: { type: string }
+        quotation:
+          type: object
+          properties:
+            exists: { type: boolean }
+            quotation_id: { type: integer }
+            quotation_no: { type: string }
+            linked_po:
+              allOf: [{ $ref: "#/components/schemas/LinkCheckPOResponse" }]
+              nullable: true
+            members:
+              type: array
+              items: { $ref: "#/components/schemas/QuotationMemberResponse" }
+        po:
+          allOf: [{ $ref: "#/components/schemas/LinkCheckPOResponse" }]
+          nullable: true
+        responsible:
+          type: object
+          nullable: true
+          description: null = tidak ada responsible yang bisa dikunci
+          properties:
+            locked: { type: boolean }
+            conflict: { type: boolean }
+            source: { type: string, enum: [quotation, po] }
+            responsible:
+              allOf: [{ $ref: "#/components/schemas/ResponsibleRefResponse" }]
+              nullable: true
+            candidates:
+              type: array
+              items: { $ref: "#/components/schemas/ResponsibleRefResponse" }
+        po_no_display:
+          type: string
+          description: Nomor PO yang akan ditampilkan ("PO BELUM RELEASE" bila belum ada)
 
     # --- purchase request: response payloads ---
     PRResponse:
@@ -3708,17 +4598,23 @@ components:
         pr_status:
           type: string
           enum: [draft, submitted, approved, rejected, revision, completed, cancelled]
-        pr_priority: { type: string, enum: [low, medium, high, urgent] }
+        pr_priority: { type: string, enum: [low, medium, high] }
         pr_priority_ref_admin: { type: string }
         pr_priority_date: { type: string, format: date-time }
         pr_create_date: { type: string, format: date-time }
         pr_modify_date: { type: string, format: date-time }
         pr_ref_previous_pr: { type: integer, nullable: true }
         previous_rfp_no: { type: string }
+        pr_ref_quotation: { type: integer, nullable: true }
+        quotation_no: { type: string }
+        pr_po_no: { type: string, description: Nomor PO mentah (kosong bila belum ada) }
+        pr_po_no_display:
+          type: string
+          description: Nomor PO untuk ditampilkan; "PO BELUM RELEASE" bila belum ada
         pr_margin:
           type: number
           format: double
-          description: "Turunan (BR-CALC-01) = pr_po_amount - pr_hpp, tidak disimpan sebagai kolom"
+          description: "Turunan = pr_po_amount - pr_hpp, tidak disimpan sebagai kolom"
         pr_margin_percentage:
           type: number
           format: double
@@ -3728,17 +4624,56 @@ components:
       type: object
       properties:
         approval_id: { type: integer }
-        approval_ref_admin: { type: string }
+        approval_ref_admin:
+          type: string
+          description: Kosong untuk level 2/3 yang belum diputuskan (general, berdasarkan slug)
         admin_name: { type: string }
         approval_ref_pr: { type: integer }
-        approval_level: { type: integer }
-        approval_type: { type: string }
+        approval_level: { type: integer, description: "1 = checker, 2 = director, 3 = finance" }
+        approval_type: { type: string, enum: [checker, director, finance] }
         approval_status:
           type: string
           enum: [pending, approved, rejected, revision_requested]
         approval_round: { type: integer }
         approval_notes: { type: string }
+        approval_decided_date: { type: string, format: date-time }
         approval_create_date: { type: string, format: date-time }
+
+    PRDecisionHistoryResponse:
+      type: object
+      properties:
+        approval_id: { type: integer }
+        pr_id: { type: integer }
+        rfp_no: { type: string }
+        pr_description_item: { type: string }
+        pr_requested_amount: { type: number, format: double }
+        requester_name: { type: string }
+        pr_status: { type: string }
+        approval_level: { type: integer }
+        approval_type: { type: string }
+        decision: { type: string, enum: [approved, rejected, revision_requested] }
+        approval_notes: { type: string }
+        approval_round: { type: integer }
+        decided_date: { type: string, format: date-time }
+
+    PRCancelRequestResponse:
+      type: object
+      properties:
+        cancel_id: { type: integer }
+        pr_id: { type: integer }
+        rfp_no: { type: string }
+        pr_description_item: { type: string }
+        pr_requested_amount: { type: number, format: double }
+        pr_status: { type: string }
+        requester_id: { type: string }
+        requester_name: { type: string }
+        cancel_reason: { type: string }
+        cancel_document_name: { type: string }
+        cancel_status: { type: string, enum: [pending, approved, rejected] }
+        reviewer_name: { type: string }
+        cancel_review_notes: { type: string }
+        cancel_review_date: { type: string, format: date-time }
+        cancel_create_date: { type: string, format: date-time }
 
     PRHistoryResponse:
       type: object
@@ -3760,7 +4695,9 @@ components:
         admin_name: { type: string }
         comment_ref_pr: { type: integer }
         comment_text: { type: string }
-        comment_type: { type: string }
+        comment_type:
+          type: string
+          description: "general, revision_request, internal_note, po_unlink, payment_cancellation, dst"
         comment_create_date: { type: string, format: date-time }
 
     PRDocumentResponse:
