@@ -46,7 +46,10 @@ func NewPRResponse(m models.PurchaseRequest) PRResponse {
 	if m.SubClient != nil {
 		subClient = *m.SubClient
 	}
-	poNoDisplay := strings.TrimSpace(*m.PoNo)
+	poNoDisplay := ""
+	if m.PoNo != nil {
+		poNoDisplay = strings.TrimSpace(*m.PoNo)
+	}
 	if poNoDisplay == "" {
 		poNoDisplay = service.PoNotReleasedLabel
 	}
