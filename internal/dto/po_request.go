@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"rms-backend/internal/utils"
+	"rms-backend/internal/repository"
 )
 
 // CreatePOItemRequest adalah payload 1 baris item saat membuat PO baru.
@@ -47,6 +48,15 @@ type CreatePORequest struct {
 	ClientAddr  string                 `json:"client_address"`
 	SubClient   string                 `json:"sub_client"`
 	Items       []CreatePOItemRequest  `json:"items"`
+	QuotNo string `json:"quot_no"`
+}
+
+type UpdateQuotHintRequest struct {
+	QuotNo string `json:"quot_no"` // kosong = hapus hint
+}
+
+func (r *UpdateQuotHintRequest) Normalize() {
+	r.QuotNo = repository.NormalizeQuotationNo(r.QuotNo)
 }
 
 func (r CreatePORequest) Validate() error {

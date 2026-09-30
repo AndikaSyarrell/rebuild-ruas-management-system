@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"rms-backend/internal/repository"
+	"rms-backend/internal/models"
 )
 
 var (
@@ -17,10 +18,24 @@ var (
 	ErrInvalidApprovalDecision = errors.New("keputusan approval harus approved atau rejected")
 	ErrApprovalNoApprovers = errors.New("minimal satu approver wajib ditentukan")	
 	ErrPRNotOwnedByActor = errors.New("purchase request ini bukan milik admin yang login")
-	ErrRevisionNotAllowedForLevel = errors.New("approver level ini tidak berwenang meminta revisi (hanya level 1 dan 2)")
+	ErrRevisionNotAllowedForLevel = errors.New("permintaan revisi hanya dapat dilakukan pada tahap checker")
 	ErrPRNotSubmittedForDecision = errors.New("purchase request ini sudah tidak berstatus submitted, keputusan approval tidak dapat diproses lagi")
 	ErrApproverSignatureRequired = errors.New("approver belum memiliki tanda tangan terdaftar, silakan unggah tanda tangan terlebih dahulu sebelum dapat melakukan approval")
 	ErrCostControlAttachmentRequired = errors.New("purchase request dengan nominal di atas Rp 50.000.000 wajib melampirkan dokumen cost control sebelum dapat disubmit")
+
+	ErrCheckerInvalid           = errors.New("checker yang dipilih tidak aktif atau tidak memiliki akses checker")
+	ErrCheckerIsRequester       = errors.New("requester tidak dapat menjadi checker untuk purchase request miliknya sendiri")
+	ErrApprovalAlreadyDecided   = errors.New("baris approval ini sudah diputuskan")
+	ErrRejectNotAllowedForLevel = errors.New("reject hanya dapat dilakukan pada tahap checker")
+	ErrApproverAccessRequired   = errors.New("admin tidak memiliki akses untuk tahap approval ini")
+	ErrApproverIsRequester      = errors.New("requester tidak dapat menyetujui purchase request miliknya sendiri")
+	ErrSignatureNotOwnedByActor = errors.New("tanda tangan yang dipilih bukan milik admin yang login")
+)
+
+const (
+	ApprovalTypeChecker  = "checker"
+	ApprovalTypeDirector = "director"
+	ApprovalTypeFinance  = "finance"
 )
 
 const costControlThreshold = 50_000_000
@@ -38,7 +53,8 @@ type PRApprovalService struct {
 	prService     *PRService
 	signatureRepo *repository.AdminSignatureRepo
 	documentRepo  *repository.PRDocumentRepo
-	paymentRepo   *repository.PRPaymentRepo // BARU
+	paymentRepo   *repository.PRPaymentRepo
+	accessRepo    *repository.AccessRepo // BARU - validasi slug checker/director/finance
 }
 
 func NewPRApprovalService(
@@ -47,20 +63,17 @@ func NewPRApprovalService(
 	prService *PRService,
 	signatureRepo *repository.AdminSignatureRepo,
 	documentRepo *repository.PRDocumentRepo,
-	paymentRepo *repository.PRPaymentRepo, // BARU
+	paymentRepo *repository.PRPaymentRepo,
+	accessRepo *repository.AccessRepo,
 ) *PRApprovalService {
 	return &PRApprovalService{
 		approvalRepo: approvalRepo, prRepo: prRepo, prService: prService,
 		signatureRepo: signatureRepo, documentRepo: documentRepo,
-		paymentRepo: paymentRepo,
+		paymentRepo: paymentRepo, accessRepo: accessRepo,
 	}
 }
 
-func (s *PRApprovalService) SubmitForApproval(ctx context.Context, prID int, actorAdminID string, approvers []ApproverAssignment) error {
-	if len(approvers) == 0 {
-		return ErrApprovalNoApprovers
-	}
-
+func (s *PRApprovalService) SubmitForApproval(ctx context.Context, prID int, actorAdminID string, signatureID int, checkerID string) error {
 	pr, err := s.prRepo.GetByID(ctx, prID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -68,25 +81,33 @@ func (s *PRApprovalService) SubmitForApproval(ctx context.Context, prID int, act
 		}
 		return err
 	}
-
 	if pr.RefAdmin != actorAdminID {
 		return ErrPRNotOwnedByActor
 	}
-
 	if pr.Status != "draft" && pr.Status != "revision" {
 		return ErrPRNotEligibleForSubmission
 	}
 
-	// BARU: requester WAJIB punya tanda tangan terdaftar sebelum submit -
-	// tanda tangan TERBARU dipakai sebagai "prepared by" pada PR ini.
-	// Dipindahkan dari CreatePR karena "prepared by" secara bisnis baru
-	// relevan saat PR benar-benar diajukan, bukan saat masih draft.
-	sig, err := s.signatureRepo.GetLatestByAdmin(ctx, actorAdminID)
+	if checkerID == actorAdminID {
+		return ErrCheckerIsRequester
+	}
+	isChecker, err := s.accessRepo.HasAccess(ctx, checkerID, ApprovalTypeChecker) // sekaligus cek admin aktif
+	if err != nil {
+		return err
+	}
+	if !isChecker {
+		return ErrCheckerInvalid
+	}
+
+	sig, err := s.signatureRepo.GetByID(ctx, signatureID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrRequesterSignatureRequired
 		}
 		return err
+	}
+	if sig.RefAdmin != actorAdminID {
+		return ErrSignatureNotOwnedByActor
 	}
 
 	if pr.RequestedAmount > costControlThreshold {
@@ -105,21 +126,15 @@ func (s *PRApprovalService) SubmitForApproval(ctx context.Context, prID int, act
 	}
 	newRound := latestRound + 1
 
-	for _, a := range approvers {
-		_, err := s.approvalRepo.GetByPRLevelRound(ctx, prID, a.Level, newRound)
-		if err == nil {
-			return ErrApprovalLevelAlreadyExists
-		}
-		if !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
-		if _, err := s.approvalRepo.Create(ctx, prID, a.AdminID, a.Level, a.Type, newRound); err != nil {
-			return err
-		}
+	seeds := []repository.ApprovalSeed{
+		{Level: 1, Type: ApprovalTypeChecker, RefAdmin: &checkerID},
+		{Level: 2, Type: ApprovalTypeDirector},
+		{Level: 3, Type: ApprovalTypeFinance},
+	}
+	if err := s.approvalRepo.CreateRound(ctx, prID, newRound, seeds); err != nil {
+		return err
 	}
 
-	// Pasang signature SEBELUM ChangeStatus, supaya kalau pemasangan gagal,
-	// PR tidak terlanjur berpindah ke status "submitted" tanpa "prepared by".
 	if err := s.prRepo.UpdateSignature(ctx, prID, sig.ID); err != nil {
 		return err
 	}
@@ -127,6 +142,7 @@ func (s *PRApprovalService) SubmitForApproval(ctx context.Context, prID int, act
 	notes := fmt.Sprintf("PR disubmit untuk approval round %d", newRound)
 	return s.prService.ChangeStatus(ctx, prID, actorAdminID, "submitted", notes)
 }
+
 
 func (s *PRApprovalService) Decide(ctx context.Context, approvalID int, actorAdminID, decision, notes string) error {
 	if decision != "approved" && decision != "rejected" {
@@ -140,11 +156,6 @@ func (s *PRApprovalService) Decide(ctx context.Context, approvalID int, actorAdm
 		}
 		return err
 	}
-
-	if approval.RefAdmin != actorAdminID {
-		return ErrApprovalNotOwnedByActor
-	}
-
 	pr, err := s.prRepo.GetByID(ctx, approval.RefPR)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -152,26 +163,23 @@ func (s *PRApprovalService) Decide(ctx context.Context, approvalID int, actorAdm
 		}
 		return err
 	}
+
+	if err := s.authorizeApprover(ctx, approval, pr, actorAdminID); err != nil {
+		return err
+	}
 	if pr.Status != "submitted" {
 		return ErrPRNotSubmittedForDecision
 	}
-
-	if approval.Level > 1 {
-		prev, err := s.approvalRepo.GetByPRLevelRound(ctx, approval.RefPR, approval.Level-1, approval.Round)
-		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return ErrApprovalSequenceViolation
-			}
-			return err
-		}
-		if prev.Status != "approved" {
-			return ErrApprovalSequenceViolation
-		}
+	if approval.Status != "pending" {
+		return ErrApprovalAlreadyDecided
+	}
+	if decision == "rejected" && approval.Level != 1 {
+		return ErrRejectNotAllowedForLevel
+	}
+	if err := s.ensurePreviousLevelApproved(ctx, approval); err != nil {
+		return err
 	}
 
-	// Persyaratan baru: melakukan APPROVE (bukan reject) mewajibkan approver
-	// punya tanda tangan terdaftar. Tanda tangan TERBARU milik admin otomatis
-	// dipakai & dicatat sebagai jejak pada baris approval ini.
 	var signatureRef *int
 	if decision == "approved" {
 		sig, err := s.signatureRepo.GetLatestByAdmin(ctx, actorAdminID)
@@ -184,8 +192,12 @@ func (s *PRApprovalService) Decide(ctx context.Context, approvalID int, actorAdm
 		signatureRef = &sig.ID
 	}
 
-	if err := s.approvalRepo.UpdateStatus(ctx, approvalID, decision, notes, signatureRef); err != nil {
+	changed, err := s.approvalRepo.Decide(ctx, approvalID, actorAdminID, decision, notes, signatureRef)
+	if err != nil {
 		return err
+	}
+	if !changed {
+		return ErrApprovalAlreadyDecided
 	}
 
 	if decision == "rejected" {
@@ -198,14 +210,57 @@ func (s *PRApprovalService) Decide(ctx context.Context, approvalID int, actorAdm
 	}
 	for _, sib := range siblings {
 		if sib.Level > approval.Level {
-			return nil
+			return nil // masih ada level berikutnya
 		}
 	}
 
 	if err := s.prService.ChangeStatus(ctx, approval.RefPR, actorAdminID, "approved", "Seluruh level approval telah disetujui"); err != nil {
 		return err
 	}
-	return s.paymentRepo.ActivateDraftPayments(ctx, approval.RefPR) // BARU
+	return s.paymentRepo.ActivateDraftPayments(ctx, approval.RefPR)
+}
+
+// authorizeApprover: L1 = harus checker yang ditugaskan; L2/L3 = siapa pun yang
+// memegang slug sesuai approval_type baris tsb (director/finance).
+func (s *PRApprovalService) authorizeApprover(ctx context.Context, a *models.PRApproval, pr *models.PurchaseRequest, actor string) error {
+	if a.Level == 1 {
+		if a.RefAdmin == nil || *a.RefAdmin != actor {
+			return ErrApprovalNotOwnedByActor
+		}
+		return nil
+	}
+	if pr.RefAdmin == actor {
+		return ErrApproverIsRequester
+	}
+	// toleransi PR lama yang L2/L3-nya sudah ditugaskan ke orang tertentu
+	if a.RefAdmin != nil && *a.RefAdmin == actor {
+		return nil
+	}
+	ok, err := s.accessRepo.HasAccess(ctx, actor, a.Type)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return ErrApproverAccessRequired
+	}
+	return nil
+}
+
+func (s *PRApprovalService) ensurePreviousLevelApproved(ctx context.Context, a *models.PRApproval) error {
+	if a.Level <= 1 {
+		return nil
+	}
+	prev, err := s.approvalRepo.GetByPRLevelRound(ctx, a.RefPR, a.Level-1, a.Round)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrApprovalSequenceViolation
+		}
+		return err
+	}
+	if prev.Status != "approved" {
+		return ErrApprovalSequenceViolation
+	}
+	return nil
 }
 
 func (s *PRApprovalService) RequestRevision(ctx context.Context, approvalID int, actorAdminID, notes string) error {
@@ -216,12 +271,14 @@ func (s *PRApprovalService) RequestRevision(ctx context.Context, approvalID int,
 		}
 		return err
 	}
-
-	if approval.RefAdmin != actorAdminID {
+	if approval.Level != 1 {
+		return ErrRevisionNotAllowedForLevel
+	}
+	if approval.RefAdmin == nil || *approval.RefAdmin != actorAdminID {
 		return ErrApprovalNotOwnedByActor
 	}
-	if approval.Level >= 3 {
-		return ErrRevisionNotAllowedForLevel
+	if approval.Status != "pending" {
+		return ErrApprovalAlreadyDecided
 	}
 
 	pr, err := s.prRepo.GetByID(ctx, approval.RefPR)
@@ -235,66 +292,19 @@ func (s *PRApprovalService) RequestRevision(ctx context.Context, approvalID int,
 		return ErrPRNotSubmittedForDecision
 	}
 
-	if approval.Level > 1 {
-		prev, err := s.approvalRepo.GetByPRLevelRound(ctx, approval.RefPR, approval.Level-1, approval.Round)
-		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return ErrApprovalSequenceViolation
-			}
-			return err
-		}
-		if prev.Status != "approved" {
-			return ErrApprovalSequenceViolation
-		}
-	}
-
-	if err := s.approvalRepo.UpdateStatus(ctx, approvalID, "revision_requested", notes, nil); err != nil {
+	changed, err := s.approvalRepo.Decide(ctx, approvalID, actorAdminID, "revision_requested", notes, nil)
+	if err != nil {
 		return err
 	}
-
+	if !changed {
+		return ErrApprovalAlreadyDecided
+	}
 	return s.prService.TransitionToRevision(ctx, approval.RefPR, actorAdminID, notes)
-}
-
-var (
-	ErrPRNotApprover         = errors.New("hanya approver level 1 pada round approval terbaru PR ini yang dapat mengatur priority")
-	ErrPRLevel1NotFound      = errors.New("baris approval level 1 untuk PR ini belum tersedia (PR belum pernah disubmit)")
-	ErrPRDraftCannotPriority = errors.New("priority tidak dapat diatur selama PR masih berstatus draft")
-)
-
-func (s *PRApprovalService) SetPriority(ctx context.Context, prID int, adminID, priority string) error {
-	pr, err := s.prRepo.GetByID(ctx, prID)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return ErrNotFound
-		}
-		return err
-	}
-	if pr.Status == "draft" {
-		return ErrPRDraftCannotPriority
-	}
-
-	round, err := s.approvalRepo.GetLatestRound(ctx, prID)
-	if err != nil {
-		return err
-	}
-
-	level1, err := s.approvalRepo.GetByPRLevelRound(ctx, prID, 1, round)
-	if errors.Is(err, sql.ErrNoRows) {
-		return ErrPRLevel1NotFound
-	}
-	if err != nil {
-		return err
-	}
-	if level1.RefAdmin != adminID {
-		return ErrPRNotApprover
-	}
-
-	return s.prRepo.UpdatePriority(ctx, prID, priority, adminID)
 }
 
 type BulkSubmitItem struct {
 	PRID      int
-	Approvers []ApproverAssignment
+	CheckerID string
 }
 
 type BulkSubmitResult struct {
@@ -303,14 +313,11 @@ type BulkSubmitResult struct {
 	Error   string `json:"error,omitempty"`
 }
 
-func (s *PRApprovalService) BulkSubmitForApproval(ctx context.Context, actorAdminID string, items []BulkSubmitItem) []BulkSubmitResult {
+func (s *PRApprovalService) BulkSubmitForApproval(ctx context.Context, actorAdminID string, signatureID int, items []BulkSubmitItem) []BulkSubmitResult {
 	results := make([]BulkSubmitResult, 0, len(items))
 	for _, it := range items {
-		err := s.SubmitForApproval(ctx, it.PRID, actorAdminID, it.Approvers)
-		if err != nil {
-			results = append(results, BulkSubmitResult{
-				PRID: it.PRID, Success: false, Error: submitErrorMessage(err),
-			})
+		if err := s.SubmitForApproval(ctx, it.PRID, actorAdminID, signatureID, it.CheckerID); err != nil {
+			results = append(results, BulkSubmitResult{PRID: it.PRID, Success: false, Error: submitErrorMessage(err)})
 			continue
 		}
 		results = append(results, BulkSubmitResult{PRID: it.PRID, Success: true})
@@ -328,12 +335,18 @@ func submitErrorMessage(err error) string {
 		return "Requester belum memiliki tanda tangan terdaftar"
 	case errors.Is(err, ErrApprovalLevelAlreadyExists):
 		return "Level approval ini sudah dibuat untuk round yang sama"
-	case errors.Is(err, ErrApprovalNoApprovers):
-		return "Minimal satu approver wajib ditentukan"
+	case errors.Is(err, ErrCheckerInvalid):
+		return "Checker yang dipilih tidak aktif atau tidak memiliki akses checker"
+	case errors.Is(err, ErrCheckerIsRequester):
+		return "Requester tidak dapat menjadi checker untuk PR miliknya sendiri"
+	case errors.Is(err, ErrSignatureNotOwnedByActor):
+		return "Tanda tangan yang dipilih bukan milik Anda"
 	case errors.Is(err, ErrPRNotOwnedByActor):
 		return "Purchase request ini bukan milik admin yang login"
 	case errors.Is(err, ErrCostControlAttachmentRequired):
 		return "Dokumen cost control wajib diunggah terlebih dahulu (nominal di atas Rp 50.000.000)"
+	case errors.Is(err, ErrSignatureNotOwnedByActor): 
+		return "Tanda tangan yang dipilih bukan milik Anda"
 	default:
 		return "Gagal submit purchase request"
 	}

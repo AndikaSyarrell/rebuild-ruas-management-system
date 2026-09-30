@@ -123,10 +123,6 @@ func (r *PRPaymentRepo) UpdateStatus(ctx context.Context, paymentID int, status 
 	return err
 }
 
-// CountByStatus mengembalikan agregasi status pembayaran milik satu PR -
-// dipakai service untuk mengevaluasi BR-PR-02/BR-PAY-02 ("semua payment
-// berstatus paid -> PR completed"). Map hanya berisi status yang benar-benar
-// muncul; pemanggil yang menyimpulkan "semua paid" dari total baris.
 func (r *PRPaymentRepo) CountByStatus(ctx context.Context, prID int) (map[string]int, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT payment_status, COUNT(*) FROM T_Pr_Payment WHERE payment_ref_pr = ? GROUP BY payment_status`, prID)
@@ -309,4 +305,14 @@ func (r *PRPaymentRepo) ReplaceDraftPayments(ctx context.Context, prID int, admi
 	}
 
 	return tx.Commit()
+}
+
+func (r *PRPaymentRepo) UpdatePriorityDate(ctx context.Context, paymentID int, date string) error {
+	var arg interface{}
+	if date != "" {
+		arg = date
+	}
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE T_Pr_Payment SET payment_priority_date = ? WHERE payment_id = ?`, arg, paymentID)
+	return err
 }

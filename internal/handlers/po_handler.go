@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -21,10 +22,12 @@ type POHandler struct {
 	clientRepo    *repository.ClientRepo
 	ppnRepo       *repository.PpnRepo
 	exportService *service.ExportService
+	poService     *service.POService          // BARU - PR-PO Linking
+	quotationRepo *repository.PRQuotationRepo // BARU - PR-PO Linking
 }
 
-func NewPOHandler(repo *repository.PORepo, activityRepo *repository.ActivityRepo, clientRepo *repository.ClientRepo, ppnRepo *repository.PpnRepo, exportService *service.ExportService) *POHandler {
-	return &POHandler{repo: repo, activityRepo: activityRepo, clientRepo: clientRepo, ppnRepo: ppnRepo, exportService: exportService}
+func NewPOHandler(repo *repository.PORepo, activityRepo *repository.ActivityRepo, clientRepo *repository.ClientRepo, ppnRepo *repository.PpnRepo, exportService *service.ExportService, poService *service.POService, quotationRepo *repository.PRQuotationRepo) *POHandler {
+	return &POHandler{repo: repo, activityRepo: activityRepo, clientRepo: clientRepo, ppnRepo: ppnRepo, exportService: exportService, poService: poService, quotationRepo: quotationRepo}
 }
 
 func (h *POHandler) logActivity(r *http.Request, poID, actType, notes string) {
@@ -144,7 +147,23 @@ func (h *POHandler) Detail(w http.ResponseWriter, r *http.Request) {
 		utils.Error(w, http.StatusInternalServerError, "Gagal mengambil item PO")
 		return
 	}
-	utils.OK(w, "Fetch success", dto.NewPOWithItemsResponse(*po, items))
+
+	quotations, err := h.quotationRepo.ListByPO(r.Context(), id)
+	if err != nil {
+		utils.Error(w, http.StatusInternalServerError, "Gagal mengambil daftar quotation ter-link")
+		return
+	}
+	linked := make([]dto.LinkedQuotationResponse, 0, len(quotations))
+	for _, q := range quotations {
+		members, err := h.quotationRepo.MemberPRs(r.Context(), q.ID)
+		if err != nil {
+			utils.Error(w, http.StatusInternalServerError, "Gagal mengambil anggota quotation")
+			return
+		}
+		linked = append(linked, dto.NewLinkedQuotationResponse(q, members))
+	}
+
+	utils.OK(w, "Fetch success", dto.NewPOWithItemsResponse(*po, items, linked))
 }
 
 // POST /api/po
@@ -245,8 +264,32 @@ func (h *POHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if hint := repository.NormalizeQuotationNo(req.QuotNo); hint != "" {
+		_ = h.repo.UpdateQuotHint(r.Context(), poID, hint)
+	}
+
 	h.logActivity(r, poID, "open", "Purchase order baru dibuat")
 	utils.Created(w, "PO berhasil dibuat", map[string]any{"po_id": poID})
+}
+
+func (h *POHandler) UpdateQuotHint(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var req dto.UpdateQuotHintRequest
+	if err := decodeJSON(r, &req); err != nil{
+		utils.Error(w, http.StatusBadRequest, "Body request tidak valid")
+		return
+	}
+	req.Normalize()
+	if _, err := h.repo.GetDetail(r.Context(), id); err != nil {
+		utils.Error(w, http.StatusNotFound, "PO tidak ditemukan")
+		return
+	}
+	if err := h.repo.UpdateQuotHint(r.Context(), id, req.QuotNo); err != nil {
+		utils.Error(w, http.StatusInternalServerError, "Gagal memperbaru hint qoutation")
+		return
+	}
+	h.logActivity(r, id, "edit", "memperbarui hint nomor qoutation")
+	utils.OK(w, "hint quotation berhasil diperbarui", nil)
 }
 
 // PUT /api/po/{id}
@@ -335,6 +378,25 @@ func (h *POHandler) ChangeStatus(w http.ResponseWriter, r *http.Request) {
 		utils.Error(w, http.StatusInternalServerError, "Gagal mengubah status PO")
 		return
 	}
+	if req.Status == "cancel" || req.Status == "open" {
+		linked, err := h.quotationRepo.ListByPO(r.Context(), id)
+		if err != nil {
+			utils.Error(w, http.StatusInternalServerError, "Gagal memeriksa link quotation")
+			return
+		}
+		if len(linked) > 0 {
+			msg := "PO masih ter-link ke quotation, cabut link terlebih dahulu sebelum membatalkan PO"
+			if req.Status == "open" {
+				msg = "PO masih ter-link ke quotation, cabut link terlebih dahulu sebelum mengembalikan status PO ke open"
+			}
+			utils.Error(w, http.StatusConflict, msg)
+			return
+		}
+	}
+	if err := h.repo.ChangeStatus(r.Context(), id, req.Status); err != nil {
+		utils.Error(w, http.StatusInternalServerError, "Gagal mengubah status PO")
+		return
+	}
 	h.logActivity(r, id, req.Status, "Mengubah status menjadi "+req.Status)
 	utils.OK(w, "Status PO berhasil diperbarui", nil)
 }
@@ -402,11 +464,97 @@ func (h *POHandler) UpdateNotes(w http.ResponseWriter, r *http.Request) {
 // DELETE /api/po/{id}
 func (h *POHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	if err := h.repo.Delete(r.Context(), id); err != nil {
-		utils.Error(w, http.StatusInternalServerError, "Gagal menghapus PO")
+	adminID, _ := actorFromContext(r.Context())
+	err := h.poService.Delete(r.Context(), id, adminID)
+	switch {
+	case err == nil:
+		utils.OK(w, "PO berhasil dihapus", nil)
+	case errors.Is(err, service.ErrNotFound):
+		utils.Error(w, http.StatusNotFound, "PO tidak ditemukan.")
+	default:
+		utils.Error(w, http.StatusInternalServerError, "Gagal Menghapus PO")
+	}
+}
+
+func (h *POHandler) QuotationCandidates(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	keyword := r.URL.Query().Get("keyword")
+
+	candidates, err := h.poService.ListQuotationCandidates(r.Context(), id, keyword)
+	if err != nil {
+		utils.Error(w, http.StatusInternalServerError, "Gagal mengambil daftar kandidat quotation")
 		return
 	}
-	utils.OK(w, "PO berhasil dihapus", nil)
+	utils.OK(w, "Fetch success", dto.NewQuotationCandidateResponseList(candidates))
+}
+
+func (h *POHandler) LinkQuotation(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var req dto.LinkQuotationRequest
+	if err := decodeJSON(r, &req); err != nil {
+		utils.Error(w, http.StatusBadRequest, "Body permintaan tidak valid")
+		return
+	}
+	if err := req.Validate(); err != nil {
+		utils.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	adminID, ok := actorFromContext(r.Context())
+	if !ok {
+		utils.Error(w, http.StatusUnauthorized, "Tidak terautentikasi")
+		return
+	}
+
+	err := h.poService.LinkQuotation(r.Context(), id, int(req.QuotationID), adminID)
+	switch {
+	case err == nil:
+		h.logActivity(r, id, "link_quotation", "Menautkan quotation ke purchase order ini")
+		utils.OK(w, "Quotation berhasil di-link ke PO", nil)
+	case errors.Is(err, service.ErrNotFound):
+		utils.Error(w, http.StatusNotFound, "PO atau quotation tidak ditemukan")
+	case errors.Is(err, service.ErrPONotLinkable):
+		utils.Error(w, http.StatusConflict, "PO harus berstatus prepared, progress, atau complete sebelum dapat di-link ke quotation")
+	case errors.Is(err, service.ErrQuotationAlreadyLinked):
+		utils.Error(w, http.StatusConflict, "Quotation ini sudah ter-link ke PO lain")
+	case errors.Is(err, service.ErrQuotationNotEligible):
+		utils.Error(w, http.StatusConflict, "Belum ada purchase request anggota grup quotation ini yang berstatus completed")
+	default:
+		utils.Error(w, http.StatusInternalServerError, "Gagal menautkan quotation ke PO")
+	}
+}
+
+// POST /api/po/{id}/unlink-quotation
+func (h *POHandler) UnlinkQuotation(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var req dto.UnlinkQuotationRequest
+	if err := decodeJSON(r, &req); err != nil {
+		utils.Error(w, http.StatusBadRequest, "Body permintaan tidak valid")
+		return
+	}
+	if err := req.Validate(); err != nil {
+		utils.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	adminID, ok := actorFromContext(r.Context())
+	if !ok {
+		utils.Error(w, http.StatusUnauthorized, "Tidak terautentikasi")
+		return
+	}
+
+	err := h.poService.UnlinkQuotation(r.Context(), id, int(req.QuotationID), adminID, req.Notes)
+	switch {
+	case err == nil:
+		h.logActivity(r, id, "unlink_quotation", "Mencabut link quotation dari purchase order ini: "+req.Notes)
+		utils.OK(w, "Link quotation berhasil dicabut", nil)
+	case errors.Is(err, service.ErrNotFound):
+		utils.Error(w, http.StatusNotFound, "Quotation tidak ditemukan")
+	case errors.Is(err, service.ErrQuotationNotLinkedToThisPO):
+		utils.Error(w, http.StatusBadRequest, "Quotation ini tidak ter-link ke PO yang dimaksud")
+	default:
+		utils.Error(w, http.StatusInternalServerError, "Gagal mencabut link quotation")
+	}
 }
 
 // --- Items ---

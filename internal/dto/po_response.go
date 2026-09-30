@@ -68,6 +68,8 @@ type POResponse struct {
 	PpnID       int    `json:"ppn_id"`
 	ClientID    int    `json:"client_id"`
 
+	QuotNo string `json:"po_quot_no,omitempty"`
+
 	ClientName  string `json:"client_name"`
 	ClientEmail string `json:"client_email"`
 	ClientPhone string `json:"client_phone"`
@@ -130,6 +132,8 @@ func NewPOResponse(m models.PO) POResponse {
 		PpnID:       m.RefPpn,
 		ClientID:    m.RefClient,
 
+		QuotNo: m.QuotHint,
+
 		ClientName:  m.ClientName,
 		ClientEmail: m.ClientEmail,
 		ClientPhone: m.ClientPhone,
@@ -155,14 +159,19 @@ func NewPOResponse(m models.PO) POResponse {
 // POWithItemsResponse membungkus detail PO + daftar itemnya, dipakai oleh
 // endpoint GET /po/{id}.
 type POWithItemsResponse struct {
-	PO    POResponse       `json:"po"`
-	Items []POItemResponse `json:"items"`
+	PO               POResponse                 `json:"po"`
+	Items            []POItemResponse           `json:"items"`
+	LinkedQuotations []LinkedQuotationResponse  `json:"linked_quotations"` // BARU - PR-PO Linking (§4.5), murni tambahan
 }
 
-func NewPOWithItemsResponse(po models.PO, items []models.POItem) POWithItemsResponse {
+func NewPOWithItemsResponse(po models.PO, items []models.POItem, linkedQuotations []LinkedQuotationResponse) POWithItemsResponse {
+	if linkedQuotations == nil {
+		linkedQuotations = []LinkedQuotationResponse{}
+	}
 	return POWithItemsResponse{
-		PO:    NewPOResponse(po),
-		Items: NewPOItemResponseList(items),
+		PO:               NewPOResponse(po),
+		Items:            NewPOItemResponseList(items),
+		LinkedQuotations: linkedQuotations,
 	}
 }
 

@@ -59,6 +59,9 @@ var validPRDocTypes = map[string]bool{
 // GET /api/pr/{id}/documents
 func (h *PRDocumentHandler) ListByPR(w http.ResponseWriter, r *http.Request) {
 	prID, ok := utils.ParseIDParam(w, chi.URLParam(r, "id"))
+	if !requirePRVisible(w, r, h.prRepo, prID) {
+		return
+	}
 	if !ok {
 		return
 	}

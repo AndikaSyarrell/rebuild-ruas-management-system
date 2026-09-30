@@ -44,3 +44,28 @@ func RequireAccess(checker AccessChecker, slug string) func(http.Handler) http.H
 		})
 	}
 }
+
+// RequireAnyAccess meloloskan request bila admin punya SALAH SATU slug.
+func RequireAnyAccess(checker AccessChecker, slugs ...string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			claims, ok := ClaimsFromContext(r.Context())
+			if !ok {
+				utils.Error(w, http.StatusUnauthorized, "Tidak terautentikasi")
+				return
+			}
+			for _, slug := range slugs {
+				allowed, err := checker.HasAccess(r.Context(), claims.AdminID, slug)
+				if err != nil {
+					utils.Error(w, http.StatusInternalServerError, "Gagal memeriksa hak akses")
+					return
+				}
+				if allowed {
+					next.ServeHTTP(w, r)
+					return
+				}
+			}
+			utils.Error(w, http.StatusForbidden, "Anda tidak memiliki akses untuk aksi ini")
+		})
+	}
+}

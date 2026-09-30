@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"fmt"
+	"database/sql"
 
 	"github.com/go-chi/chi/v5"
 
@@ -31,6 +32,9 @@ func NewPRPaymentHandler(repo *repository.PRPaymentRepo, prRepo *repository.PRRe
 // GET /api/pr/{id}/payments
 func (h *PRPaymentHandler) ListByPR(w http.ResponseWriter, r *http.Request) {
 	prID, ok := utils.ParseIDParam(w, chi.URLParam(r, "id"))
+	if !requirePRVisible(w, r, h.prRepo, prID) {
+		return
+	}
 	if !ok {
 		return
 	}
@@ -161,6 +165,9 @@ func (h *PRPaymentHandler) Cancel(w http.ResponseWriter, r *http.Request) {
 
 func (h *PRPaymentHandler) PaymentChain(w http.ResponseWriter, r *http.Request) {
 	prID, ok := utils.ParseIDParam(w, chi.URLParam(r, "id"))
+	if !requirePRVisible(w, r, h.prRepo, prID) {
+		return
+	}
 	if !ok {
 		return
 	}
@@ -214,4 +221,47 @@ func (h *PRPaymentHandler) Export(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
 	w.Write(data)
+}
+
+func (h *PRPaymentHandler) SetPriorityDate(w http.ResponseWriter, r *http.Request) {
+	paymentID, ok := utils.ParseIDParam(w, chi.URLParam(r, "paymendId"))
+	if !ok {
+		return
+	}
+	var req dto.SetPaymentPriorityDateRequest
+	if err := decodeJSON(r, &req); err != nil{
+		utils.Error(w, http.StatusBadRequest, "body request tidak valid")
+		return
+	}
+	date := ""
+	if v := strings.TrimSpace(req.PriorityDate); v != ""{
+		date = utils.ParseDateParam(v)
+		if date == ""{
+			utils.Error(w, http.StatusBadRequest, "Tanggal pembayaran tidak valid")
+		}
+		return
+	}
+	payment, err := h.repo.GetByID(r.Context(), paymentID) 
+	if errors.Is(err, sql.ErrNoRows){
+		utils.Error(w, http.StatusNotFound, "data pembayaran tidak ditemukan")
+		return
+	}
+	if err != nil{
+		utils.Error(w, http.StatusInternalServerError, "gagal mengambil data pembayaran")
+	}
+	if !requirePRVisible(w, r, h.prRepo, payment.RefPR){
+		return
+	}
+
+	err = h.service.SetPriorityDate(r.Context(), paymentID, date)
+	switch {
+	case err == nil:
+		utils.OK(w, "Tanggal prioritas pembayaran berhasil diperbarui", nil)
+	case errors.Is(err, service.ErrNotFound):
+		utils.Error(w, http.StatusNotFound, "Data pembayaran tidak ditemukan")
+	case errors.Is(err, service.ErrPaymentNotPending):
+		utils.Error(w, http.StatusConflict, "Tanggal prioritas hanya dapat diatur pada pembayaran berstatus pending")
+	default:
+		utils.Error(w, http.StatusInternalServerError, "Gagal memperbarui tanggal prioritas pembayaran")
+	}
 }

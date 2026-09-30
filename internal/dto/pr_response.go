@@ -2,8 +2,11 @@ package dto
 
 import (
 	"time"
+	"strings"
 
 	"rms-backend/internal/models"
+	"rms-backend/internal/service"
+	"rms-backend/internal/repository"
 )
 
 type PRResponse struct {
@@ -27,13 +30,13 @@ type PRResponse struct {
 	PriorityDate      string  `json:"pr_priority_date,omitempty"`
 	CreateDate        string  `json:"pr_create_date"`
 	ModifyDate        string  `json:"pr_modify_date"`
+	PoNoDisplay 	  string `json:"pr_po_no_display"`
 
-	RefPreviousPR *int   `json:"pr_ref_previous_pr,omitempty"` // BARU
-	PreviousRfpNo string `json:"previous_rfp_no,omitempty"`    // BARU
-
-	// Turunan (BR-CALC-01) - akan terisi nyata setelah Slice G selesai.
-	// Sengaja tetap disertakan di response sekarang (bernilai 0) supaya
-	// kontrak API tidak berubah lagi saat Slice G masuk.
+	RefPreviousPR *int   `json:"pr_ref_previous_pr,omitempty"` 
+	PreviousRfpNo string `json:"previous_rfp_no,omitempty"`    
+	RefQuotation *int   `json:"pr_ref_quotation,omitempty"`
+	QuotationNo  string `json:"quotation_no,omitempty"`
+	PoNo         string `json:"pr_po_no,omitempty"`          
 	Margin           float64 `json:"pr_margin"`
 	MarginPercentage float64 `json:"pr_margin_percentage"`
 }
@@ -42,6 +45,10 @@ func NewPRResponse(m models.PurchaseRequest) PRResponse {
 	subClient := ""
 	if m.SubClient != nil {
 		subClient = *m.SubClient
+	}
+	poNoDisplay := strings.TrimSpace(*m.PoNo)
+	if poNoDisplay == "" {
+		poNoDisplay = service.PoNotReleasedLabel
 	}
 	qoutNo := ""
 	if m.QoutNo != nil {
@@ -54,6 +61,10 @@ func NewPRResponse(m models.PurchaseRequest) PRResponse {
 	priorityRefAdmin := ""
 	if m.PriorityRefAdmin != nil {
 		priorityRefAdmin = *m.PriorityRefAdmin
+	}
+	poNo := ""
+	if m.PoNo != nil {
+		poNo = *m.PoNo
 	}
 
 	margin := m.PoAmount - m.Hpp
@@ -78,6 +89,9 @@ func NewPRResponse(m models.PurchaseRequest) PRResponse {
 		TargetInvoiceDate: formatDate(m.TargetInvoiceDate),
 		RefPreviousPR: 	   m.RefPreviousPR,
 		PreviousRfpNo:	   m.PreviousRfpNo,
+		RefQuotation:      m.RefQuotation,
+		QuotationNo:       m.QuotationNo,
+		PoNo:              poNo,
 		Status:            m.Status,
 		Priority:          priority,
 		PriorityRefAdmin:  priorityRefAdmin,
@@ -97,6 +111,32 @@ func NewPRResponseList(list []models.PurchaseRequest) []PRResponse {
 	return out
 }
 
+type QuotationConflictResponse struct {
+	QuotationID int                        `json:"quotation_id"`
+	QuotationNo string                     `json:"quotation_no"`
+	LinkedPO    string                     `json:"linked_po,omitempty"` 	
+	Members     []QuotationMemberResponse  `json:"members"`
+}
+
+type QuotationMemberResponse struct {
+	PRID   int    `json:"pr_id"`
+	RfpNo  string `json:"rfp_no"`
+	Status string `json:"pr_status"`
+}
+
+func NewQuotationConflictResponse(c *service.QuotationConflict) QuotationConflictResponse {
+	members := make([]QuotationMemberResponse, 0, len(c.Members))
+	for _, m := range c.Members {
+		members = append(members, QuotationMemberResponse{PRID: m.PRID, RfpNo: m.RfpNo, Status: m.Status})
+	}
+	return QuotationConflictResponse{
+		QuotationID: c.QuotationID,
+		QuotationNo: c.QuotationNo,
+		LinkedPO:    c.LinkedPO,
+		Members:     members,
+	}
+}
+
 type PRApprovalResponse struct {
 	ID         int    `json:"approval_id"`
 	RefAdmin   string `json:"approval_ref_admin"`
@@ -107,6 +147,7 @@ type PRApprovalResponse struct {
 	Status     string `json:"approval_status"`
 	Round      int    `json:"approval_round"`
 	Notes      string `json:"approval_notes,omitempty"`
+	DecidedDate string `json:"approval_decided_date,omitempty"`
 	CreateDate string `json:"approval_create_date"`
 }
 
@@ -115,11 +156,49 @@ func NewPRApprovalResponse(m models.PRApproval) PRApprovalResponse {
 	if m.Notes != nil {
 		notes = *m.Notes
 	}
+	refAdmin := ""
+	if m.RefAdmin != nil {
+		refAdmin = *m.RefAdmin
+	}
 	return PRApprovalResponse{
-		ID: m.ID, RefAdmin: m.RefAdmin, AdminName: m.AdminName, RefPR: m.RefPR,
+		ID: m.ID, RefAdmin: refAdmin, AdminName: m.AdminName, RefPR: m.RefPR,
 		Level: m.Level, Type: m.Type, Status: m.Status, Round: m.Round,
 		Notes: notes, CreateDate: m.CreateDate.Format(time.RFC3339),
+		DecidedDate: formatDateTime(m.DecidedDate),
 	}
+}
+
+type PRDecisionHistoryResponse struct {
+	ApprovalID      int     `json:"approval_id"`
+	PRID            int     `json:"pr_id"`
+	RfpNo           string  `json:"rfp_no"`
+	DescriptionItem string  `json:"pr_description_item"`
+	RequestedAmount float64 `json:"pr_requested_amount"`
+	RequesterName   string  `json:"requester_name,omitempty"`
+	PRStatus        string  `json:"pr_status"`
+	Level           int     `json:"approval_level"`
+	Type            string  `json:"approval_type"`
+	Decision        string  `json:"decision"`
+	Notes           string  `json:"approval_notes,omitempty"`
+	Round           int     `json:"approval_round"`
+	DecidedDate     string  `json:"decided_date,omitempty"`
+}
+
+func NewPRDecisionHistoryResponseList(list []repository.DecidedApproval) []PRDecisionHistoryResponse {
+	out := make([]PRDecisionHistoryResponse, 0, len(list))
+	for _, d := range list {
+		notes := ""
+		if d.Notes != nil {
+			notes = *d.Notes
+		}
+		out = append(out, PRDecisionHistoryResponse{
+			ApprovalID: d.ID, PRID: d.RefPR, RfpNo: d.RfpNo, DescriptionItem: d.DescriptionItem,
+			RequestedAmount: d.RequestedAmount, RequesterName: d.RequesterName, PRStatus: d.PRStatus,
+			Level: d.Level, Type: d.Type, Decision: d.Status, Notes: notes, Round: d.Round,
+			DecidedDate: formatDateTime(d.DecidedDate),
+		})
+	}
+	return out
 }
 
 func NewPRApprovalResponseList(list []models.PRApproval) []PRApprovalResponse {

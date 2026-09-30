@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "8dacbc5a-4be7-4781-aab2-25c5f81b2483",
     "name": "RMS Backend API",
-    "description": "Koleksi Postman untuk RMS Backend (Go). Jalankan 'Auth > Login' dulu - access_token otomatis tersimpan ke environment dan dipakai semua request lain lewat Authorization Bearer Token di level Collection.\n\nCatatan update modul Purchase Request: (1) tanda tangan requester ('prepared by') sekarang dipasang saat Submit, bukan saat Create; (2) po_amount & hpp bisa diisi sejak Create (opsional); (3) Set PR Priority sekarang wewenang requester, bukan approver level 1; (4) endpoint baru: Cancel PR, List/Upload/Delete PR Document.",
+    "description": "Koleksi Postman untuk RMS Backend (Go). Jalankan 'Auth > Login' dulu - access_token otomatis tersimpan ke environment dan dipakai semua request lain lewat Authorization Bearer Token di level Collection.\n\nCatatan update modul Purchase Request: (1) tanda tangan requester ('prepared by') sekarang dipasang saat Submit, bukan saat Create; (2) po_amount & hpp bisa diisi sejak Create (opsional); (3) Set PR Priority sekarang wewenang requester, bukan approver level 1; (4) endpoint baru: Cancel PR, List/Upload/Delete PR Document, Download/Preview PR Document.\n\nBARU - PR-PO Linking (2026-09-23/24): purchase request kini bisa tergabung dalam grup 'quotation' (via qout_no) yang pada gilirannya bisa di-link resmi ke satu PO. Endpoint baru di modul Purchase Orders: List Quotation Candidates, Link Quotation to PO, Unlink Quotation from PO (akses baru: link_pr_po, unlink_pr_po). Create PR mendukung confirm_join_quotation untuk konfirmasi bergabung ke grup quotation existing (BR-LINK-05). Saat quotation ter-link ke PO, po_order_num otomatis disinkronkan ke pr_po_no seluruh PR anggota grup.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -1981,7 +1981,7 @@
                 "{{po_id}}"
               ]
             },
-            "description": ""
+            "description": "BARU (PR-PO Linking): response sekarang juga menyertakan 'linked_quotations' - daftar grup quotation yang sudah ter-link ke PO ini beserta ringkasan anggota PR-nya (lihat §4.5 PR-PO-Linking-Design.md)."
           },
           "response": []
         },
@@ -2316,6 +2316,118 @@
           "response": []
         },
         {
+          "name": "List Quotation Candidates (PR-PO Linking)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/po/{{po_id}}/quotation-candidates?keyword=",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "po",
+                "{{po_id}}",
+                "quotation-candidates"
+              ],
+              "query": [
+                {
+                  "key": "keyword",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "BARU (PR-PO Linking). Butuh akses 'link_pr_po'. Daftar grup quotation (T_Pr_Quotation) yang BELUM ter-link ke PO manapun (quotation_ref_po IS NULL), beserta anggota PR di tiap grup dan status masing-masing. 'keyword' opsional (filter terhadap quotation_no); jika dikosongkan, otomatis memakai po_quot_no (hint) milik PO ini jika ada. Field 'eligible' = true bila minimal satu anggota grup berstatus 'completed' (BR-LINK-01) - hanya grup eligible yang boleh di-link."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "if (data && data.data && data.data.length > 0) {",
+                  "    pm.environment.set('quotation_id', data.data[0].quotation_id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Link Quotation to PO (PR-PO Linking)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/po/{{po_id}}/link-quotation",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "po",
+                "{{po_id}}",
+                "link-quotation"
+              ]
+            },
+            "description": "BARU (PR-PO Linking). Butuh akses 'link_pr_po'. PO WAJIB berstatus 'prepared' dan quotation belum ter-link ke PO lain (409 jika sudah), serta minimal satu PR anggota grup berstatus 'completed' (BR-LINK-01, 409 jika belum eligible). Saat berhasil, po_order_num otomatis disinkronkan ke pr_po_no SELURUH PR anggota grup (apapun statusnya) dalam satu transaksi.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quotation_id\": {{quotation_id}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Unlink Quotation from PO (PR-PO Linking)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/po/{{po_id}}/unlink-quotation",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "po",
+                "{{po_id}}",
+                "unlink-quotation"
+              ]
+            },
+            "description": "BARU (PR-PO Linking). Butuh akses 'unlink_pr_po'. Mencabut link quotation dari PO ini (quotation harus benar-benar ter-link ke po_id yang dimaksud, kalau tidak dikembalikan 400). pr_po_no seluruh PR anggota grup di-NULL-kan, dan 'notes' (alasan pencabutan) WAJIB diisi karena dicatat sebagai audit trail permanen di komentar tiap PR anggota. Endpoint yang sama juga dipanggil otomatis (cascade) saat PO ini dihapus.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quotation_id\": {{quotation_id}},\n  \"notes\": \"Link dicabut karena salah pilih quotation saat linking.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
           "name": "List PO Activities",
           "request": {
             "method": "GET",
@@ -2540,7 +2652,7 @@
                 "{{pr_id}}"
               ]
             },
-            "description": "Detail 1 PR, termasuk pr_margin & pr_margin_percentage (dihitung saat response), pr_ref_previous_pr & previous_rfp_no (referensi rantai siklus pembayaran bertahap), serta pr_po_no."
+            "description": "Detail 1 PR, termasuk pr_margin & pr_margin_percentage (dihitung saat response), pr_ref_previous_pr & previous_rfp_no (referensi rantai siklus pembayaran bertahap), pr_po_no, serta (BARU, PR-PO Linking) pr_ref_quotation & quotation_no (grup quotation tempat PR ini tergabung, jika ada)."
           },
           "response": []
         },
@@ -2585,10 +2697,10 @@
                 "pr"
               ]
             },
-            "description": "Butuh akses 'create_pr'. PR dibuat berstatus 'draft'. Tanda tangan requester TIDAK wajib pada tahap ini (baru diwajibkan & dipasang sebagai 'prepared by' saat Submit PR for Approval). Admin WAJIB terhubung ke divisi (admin_ref_division) untuk pembuatan nomor RFP. po_amount & hpp opsional (estimasi awal), dapat direvisi lagi lewat 'Update PR Amounts (margin)'.\n\nBARU - ref_previous_pr (opsional): referensi ke PR sebelumnya dalam siklus pembayaran bertahap (mis. DP -> Progress -> Pelunasan). Divalidasi: harus milik requester yang sama, ref_responsible (CoA) harus SAMA (tidak boleh cross-responsible), boleh referensi PR yang belum completed, dan tidak boleh membentuk siklus.\n\nBARU - payments (opsional): rencana pembayaran awal, di-insert dalam SATU transaksi bersama PR. Payment yang disertakan di sini otomatis berstatus 'draft' (BUKAN 'pending') - baru diaktifkan otomatis jadi 'pending' saat PR ini mencapai status 'approved', supaya tidak muncul di antrean finance sebelum disetujui.",
+            "description": "Butuh akses 'create_pr'. PR dibuat berstatus 'draft'. Tanda tangan requester TIDAK wajib pada tahap ini (baru diwajibkan & dipasang sebagai 'prepared by' saat Submit PR for Approval). Admin WAJIB terhubung ke divisi (admin_ref_division) untuk pembuatan nomor RFP. po_amount & hpp opsional (estimasi awal), dapat direvisi lagi lewat 'Update PR Amounts (margin)'.\n\nBARU - ref_previous_pr (opsional): referensi ke PR sebelumnya dalam siklus pembayaran bertahap (mis. DP -> Progress -> Pelunasan). Divalidasi: harus milik requester yang sama, ref_responsible (CoA) harus SAMA (tidak boleh cross-responsible), boleh referensi PR yang belum completed, dan tidak boleh membentuk siklus.\n\nBARU - payments (opsional): rencana pembayaran awal, di-insert dalam SATU transaksi bersama PR. Payment yang disertakan di sini otomatis berstatus 'draft' (BUKAN 'pending') - baru diaktifkan otomatis jadi 'pending' saat PR ini mencapai status 'approved', supaya tidak muncul di antrean finance sebelum disetujui.\n\nBARU (PR-PO Linking) - qout_no menentukan grup quotation (T_Pr_Quotation, no_quot dinormalisasi trim+uppercase). Jika ref_previous_pr diisi dan PR sebelumnya sudah punya grup quotation, PR baru otomatis bergabung ke grup yang SAMA (qout_no harus kosong atau identik, kalau tidak -> 400 ErrQuotationMismatchWithPrevious). Jika qout_no mengarah ke grup EXISTING milik chain lain (BR-LINK-05), response PERTAMA berupa 409 berisi QuotationConflictResponse (quotation_id, quotation_no, linked_po, members) - kirim ULANG request yang SAMA dengan confirm_join_quotation=true untuk benar-benar bergabung ke grup tsb.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"ref_responsible\": \"{{responsible_id}}\",\n  \"description_item\": \"Pembelian ATK bulan Juli\",\n  \"sub_client\": \"\",\n  \"requested_amount\": 1500000,\n  \"po_amount\": 0,\n  \"hpp\": 0,\n  \"qout_no\": \"\",\n  \"target_invoice_date\": \"\",\n  \"ref_previous_pr\": null,\n  \"payments\": [\n    {\n      \"stage\": \"down_payment\",\n      \"amount\": 500000,\n      \"type\": \"transfer\",\n      \"bank\": \"BCA\",\n      \"bank_account_no\": \"1234567890\",\n      \"bank_account_name\": \"PT Contoh Vendor\",\n      \"priority_date\": \"\"\n    }\n  ]\n}",
+              "raw": "{\n  \"ref_responsible\": \"{{responsible_id}}\",\n  \"description_item\": \"Pembelian ATK bulan Juli\",\n  \"sub_client\": \"\",\n  \"requested_amount\": 1500000,\n  \"po_amount\": 0,\n  \"hpp\": 0,\n  \"qout_no\": \"\",\n  \"target_invoice_date\": \"\",\n  \"ref_previous_pr\": null,\n  \"confirm_join_quotation\": false,\n  \"payments\": [\n    {\n      \"stage\": \"down_payment\",\n      \"amount\": 500000,\n      \"type\": \"transfer\",\n      \"bank\": \"BCA\",\n      \"bank_account_no\": \"1234567890\",\n      \"bank_account_name\": \"PT Contoh Vendor\",\n      \"priority_date\": \"\"\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2765,6 +2877,52 @@
               ]
             },
             "description": "Butuh akses 'upload_pr_document'. Hanya admin yang mengunggah dokumen tersebut yang boleh menghapusnya."
+          },
+          "response": []
+        },
+        {
+          "name": "Download PR Document",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/pr/{{pr_id}}/documents/{{pr_doc_id}}/download",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "pr",
+                "{{pr_id}}",
+                "documents",
+                "{{pr_doc_id}}",
+                "download"
+              ]
+            },
+            "description": "BARU. Memaksa unduhan file (Content-Disposition: attachment). Hanya admin yang TERKAIT dengan PR ini (requester, approver di salah satu round, atau finance yang mencatat/mengonfirmasi pembayaran) yang boleh mengakses isi dokumennya - sama seperti guard List/Add Comment. Klik 'Send and Download' di Postman untuk menyimpan filenya."
+          },
+          "response": []
+        },
+        {
+          "name": "Preview PR Document",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/pr/{{pr_id}}/documents/{{pr_doc_id}}/preview",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "pr",
+                "{{pr_id}}",
+                "documents",
+                "{{pr_doc_id}}",
+                "preview"
+              ]
+            },
+            "description": "BARU. Sama seperti Download PR Document, tapi Content-Disposition di-set 'inline' supaya browser boleh menampilkan langsung (cocok untuk <iframe>/<img> di frontend, mis. preview PDF/gambar cost_control sebelum submit)."
           },
           "response": []
         },
@@ -3169,7 +3327,7 @@
                 "amounts"
               ]
             },
-            "description": "Butuh akses 'update_pr_amounts'. po_amount, hpp, dan po_no disimpan; pr_margin & pr_margin_percentage dihitung ulang saat response (margin = po_amount - hpp, margin_percentage = margin / po_amount, aman terhadap pembagian nol).\n\nBARU - po_no (opsional): nomor PO/SPK aktual dari klien. Kosongkan jika PO belum release dari klien - akan ditampilkan sebagai 'PO BELUM RELEASE' pada RFP export & laporan summary payment. Catatan: kolom ini untuk saat ini BELUM direlasikan formal ke tabel PO (masih string independen), karena ada kasus PO release sebelum PR dibuat - relasi resmi masih dalam tahap desain lebih lanjut.",
+            "description": "Butuh akses 'update_pr_amounts'. po_amount, hpp, dan po_no disimpan; pr_margin & pr_margin_percentage dihitung ulang saat response (margin = po_amount - hpp, margin_percentage = margin / po_amount, aman terhadap pembagian nol).\n\nBARU - po_no (opsional): nomor PO/SPK aktual dari klien. Kosongkan jika PO belum release dari klien - akan ditampilkan sebagai 'PO BELUM RELEASE' pada RFP export & laporan summary payment.\n\nBARU (PR-PO Linking) - jika PR ini sudah tergabung dalam grup quotation (pr_ref_quotation) yang SUDAH ter-link resmi ke sebuah PO (lewat 'Link Quotation to PO'), mengisi po_no di sini akan ditolak dengan 409 ErrPRAlreadyLinkedToPO - ubah po_no lewat proses linking/unlinking PO, bukan lewat endpoint ini. Selama belum ter-link resmi, po_no tetap boleh diisi manual seperti biasa (string independen, belum jadi FK formal).",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"po_amount\": 12000000,\n  \"hpp\": 9500000,\n  \"po_no\": \"SPK5330/00050.02/2025\"\n}",

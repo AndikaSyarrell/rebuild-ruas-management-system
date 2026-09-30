@@ -1,12 +1,5 @@
 package service
 
-// NOTE: butuh github.com/DATA-DOG/go-sqlmock, github.com/alicebob/miniredis/v2,
-// dan golang.org/x/crypto/bcrypt (semua dependency eksternal). Sandbox tempat
-// file ini ditulis tidak punya akses ke proxy.golang.org untuk mengunduhnya,
-// sehingga belum sempat di-compile/dijalankan di lingkungan tersebut.
-// Jalankan `go test ./internal/service/...` di mesin Anda sendiri (dengan
-// akses internet normal) untuk memverifikasi.
-
 import (
 	"context"
 	"database/sql"
@@ -27,10 +20,10 @@ import (
 // di admin_repo.go, supaya sqlmock.NewRows menghasilkan baris yang benar-benar
 // bisa di-scan tanpa "sql: Scan error" akibat mismatch jumlah/urutan kolom.
 var adminSelectColumns = []string{
-	"admin_id", "admin_ref_region", "admin_ref_role", "admin_token", "admin_reset_code",
+	"admin_id", "admin_ref_region", "admin_ref_role", "admin_ref_division", "admin_token", "admin_reset_code",
 	"admin_email", "admin_name", "admin_password", "admin_active", "admin_pic", "admin_pic_client",
 	"admin_img", "admin_img_thmb", "admin_create_date", "admin_modify_date",
-	"role_title", "role_slug", "region_title",
+	"role_title", "role_slug", "region_title", "division_title", "division_code",
 }
 
 func newTestAuthService(t *testing.T) (*AuthService, sqlmock.Sqlmock, *miniredis.Miniredis, func()) {
@@ -69,10 +62,10 @@ func TestAuthService_Login_Success(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("WHERE a.admin_email = ? LIMIT 1")).
 		WithArgs("admin@rms.local").
 		WillReturnRows(sqlmock.NewRows(adminSelectColumns).AddRow(
-			"ADM001", 1, 1, nil, nil,
+			"ADM001", 1, 1, nil, nil, nil,
 			"admin@rms.local", "Super Admin", hash, "active", "yes", "no",
 			nil, nil, now, now,
-			"Super Admin", "super_admin", "Jakarta",
+			"Super Admin", "super_admin", "Jakarta", "", "",
 		))
 
 	pair, admin, err := svc.Login(context.Background(), "admin@rms.local", "Admin123!")
@@ -100,10 +93,10 @@ func TestAuthService_Login_WrongPassword(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("WHERE a.admin_email = ? LIMIT 1")).
 		WithArgs("admin@rms.local").
 		WillReturnRows(sqlmock.NewRows(adminSelectColumns).AddRow(
-			"ADM001", 1, 1, nil, nil,
+			"ADM001", 1, 1, nil, nil, nil,
 			"admin@rms.local", "Super Admin", hash, "active", "yes", "no",
 			nil, nil, now, now,
-			"Super Admin", "super_admin", "Jakarta",
+			"Super Admin", "super_admin", "Jakarta", "", "",
 		))
 
 	_, _, err := svc.Login(context.Background(), "admin@rms.local", "WrongPassword!")
@@ -184,10 +177,10 @@ func TestAuthService_Refresh_RotatesToken(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("WHERE a.admin_email = ? LIMIT 1")).
 		WithArgs("admin@rms.local").
 		WillReturnRows(sqlmock.NewRows(adminSelectColumns).AddRow(
-			"ADM001", 1, 1, nil, nil,
+			"ADM001", 1, 1, nil, nil, nil,
 			"admin@rms.local", "Super Admin", hash, "active", "yes", "no",
 			nil, nil, now, now,
-			"Super Admin", "super_admin", "Jakarta",
+			"Super Admin", "super_admin", "Jakarta", "", "",
 		))
 	pair, _, err := svc.Login(context.Background(), "admin@rms.local", "Admin123!")
 	if err != nil {
@@ -198,10 +191,10 @@ func TestAuthService_Refresh_RotatesToken(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("WHERE a.admin_id = ? LIMIT 1")).
 		WithArgs("ADM001").
 		WillReturnRows(sqlmock.NewRows(adminSelectColumns).AddRow(
-			"ADM001", 1, 1, nil, nil,
+			"ADM001", 1, 1, nil, nil, nil,
 			"admin@rms.local", "Super Admin", hash, "active", "yes", "no",
 			nil, nil, now, now,
-			"Super Admin", "super_admin", "Jakarta",
+			"Super Admin", "super_admin", "Jakarta", "", "",
 		))
 
 	newPair, err := svc.Refresh(context.Background(), pair.RefreshToken)

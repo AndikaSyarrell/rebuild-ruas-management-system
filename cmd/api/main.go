@@ -21,6 +21,8 @@ import (
 	"rms-backend/internal/utils"
 )
 
+const uploadDir = "./storage/uploads"
+
 func main() {
 	config.LoadDotEnv(".env")
 	cfg := config.Load()
@@ -82,23 +84,26 @@ func main() {
 	prDocumentRepo := repository.NewPRDocumentRepo(loggingDB)
 	prCounterRepo := repository.NewPRCounterRepo(loggingDB)
 	responsibleRepo := repository.NewResponsibleRepo(loggingDB)
-
+	prQuotationRepo := repository.NewPRQuotationRepo(loggingDB) // BARU - PR-PO Linking
+	prCancelRepo := repository.NewPRCancelRepo(loggingDB)       // BARU - request pembatalan PR
+	// prCancelHandler := handlers.NewPRCancelHandler(prCancelService, prCancelRepo, prRepo, accessRepo, uploadDir)
+	
+	
 	// --- Services ---
 	authService := service.NewAuthService(adminRepo, jwtManager, rdb)
-	prService := service.NewPRService(prRepo, prHistoryRepo, prPaymentRepo, adminSignatureRepo,adminRepo, divisionRepo, prCounterRepo)
+	prService := service.NewPRService(prRepo, prHistoryRepo, prPaymentRepo, adminSignatureRepo, adminRepo, divisionRepo, prCounterRepo, prQuotationRepo, poRepo)
+	prCancelService := service.NewPRCancelService(prCancelRepo, prRepo, prApprovalRepo, prService)
 	prPaymentService := service.NewPRPaymentService(prPaymentRepo, prCommentRepo, prService)
-	prApprovalService := service.NewPRApprovalService(prApprovalRepo, prRepo, prService, adminSignatureRepo, prDocumentRepo, prPaymentRepo)
-	prExportService := service.NewPRExportService(
-	prRepo, prApprovalRepo, prPaymentRepo,
-	adminSignatureRepo,
-	"./storage/uploads",
-	)
+	poService := service.NewPOService(poRepo, prQuotationRepo, prCommentRepo)
+	prApprovalService := service.NewPRApprovalService(prApprovalRepo, prRepo, prService, adminSignatureRepo, prDocumentRepo, prPaymentRepo, accessRepo)
+	prExportService := service.NewPRExportService(prRepo, prApprovalRepo, prPaymentRepo, adminSignatureRepo, uploadDir)
 	prPaymentExportService := service.NewPRPaymentExportService(prPaymentRepo, prRepo)
 	exportService := service.NewExportService(poRepo, service.ExportConfig{
 		CacheDir:     cfg.POExportCacheDir,
 		TemplatePath: cfg.POExportTemplate,
 		TTL:          cfg.POExportTTL,
 	})
+
 	loginThrottle := middleware.NewLoginThrottle(rdb, cfg.LoginMaxAttemptsPerIP, cfg.LoginAttemptsPerIPWindow,
 		cfg.LoginMaxAttemptsPerEmail, cfg.LoginLockoutDuration)
 	pwThrottle := middleware.NewPasswordChangeThrottle(rdb, cfg.PwChangeMaxAttempts, cfg.PwChangeLockoutDuration)
@@ -122,17 +127,18 @@ func main() {
 		AccessHandler:    handlers.NewAccessHandler(accessRepo),
 		AdminHandler:     handlers.NewAdminHandler(adminRepo, mailService, "./storage/uploads", cfg.FrontendBaseURL),
 		ClientHandler:    handlers.NewClientHandler(clientRepo),
-		POHandler:        handlers.NewPOHandler(poRepo, activityRepo, clientRepo, ppnRepo, exportService),
-		PRHandler:        handlers.NewPRHandler(prRepo, prHistoryRepo, prApprovalRepo, prCommentRepo, prService, prApprovalService, prExportService),
+		POHandler:        handlers.NewPOHandler(poRepo, activityRepo, clientRepo, ppnRepo, exportService, poService, prQuotationRepo),
+		PRHandler:        handlers.NewPRHandler(prRepo, prHistoryRepo, prApprovalRepo, prCommentRepo, prService, prApprovalService, prExportService, prPaymentRepo,),
 		PRPaymentHandler: handlers.NewPRPaymentHandler(prPaymentRepo, prRepo, prPaymentService, prPaymentExportService),
 		SignatureHandler: handlers.NewSignatureHandler(adminSignatureRepo, "./storage/uploads"),
 
-		PRDocumentHandler: handlers.NewPRDocumentHandler(prDocumentRepo, prRepo, "./storage/uploads"),
+		PRDocumentHandler:  handlers.NewPRDocumentHandler(prDocumentRepo, prRepo, uploadDir),
 		ResponsibleHandler: handlers.NewResponsibleHandler(responsibleRepo),
 		ActivityHandler:  handlers.NewActivityHandler(activityRepo),
-		DocumentHandler:  handlers.NewDocumentHandler(documentRepo, poRepo, activityRepo, "./storage/uploads"),
+		DocumentHandler:  handlers.NewDocumentHandler(documentRepo, poRepo, activityRepo, uploadDir),
 		DashboardHandler: handlers.NewDashboardHandler(poRepo),
 		ReportHandler:    handlers.NewReportHandler(poRepo, logger),
+		PRCancelHandler:    handlers.NewPRCancelHandler(prCancelService, prCancelRepo, prRepo, accessRepo, uploadDir),
 	}
 
 	handler := routes.New(deps)

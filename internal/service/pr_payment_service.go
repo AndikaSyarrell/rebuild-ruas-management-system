@@ -13,6 +13,7 @@ var (
 	ErrPaymentMakerCheckerViolation = errors.New("admin yang mengonfirmasi pembayaran tidak boleh sama dengan admin yang mencatatnya")
 	ErrPaymentAlreadyPaid = errors.New("pembayaran ini sudah dikonfirmasi lunas sebelumnya")
 	ErrPaymentAlreadyCancelled = errors.New("pembayaran ini sudah dibatalkan")
+	ErrPaymentNotPending = errors.New("tanggal prioritas hanya dapat diatur pada pembayaran berstatus pending")
 )
 
 type PRPaymentService struct {
@@ -114,4 +115,18 @@ func (s *PRPaymentService) GetPaymentChainHistory(ctx context.Context, prID int)
 		})
 	}
 	return out, nil
+}
+
+func (s *PRPaymentService) SetPriorityDate(ctx context.Context, paymentID int, date string) error{
+	payment, err := s.paymentRepo.GetByID(ctx, paymentID)
+	if err != nil{
+		if errors.Is(err, sql.ErrNoRows){
+			return ErrNotFound
+		}
+		return err
+	}
+	if payment.Status != "pending"{
+		return ErrPaymentNotPending
+	}
+	return s.paymentRepo.UpdatePriorityDate(ctx, paymentID, date)
 }

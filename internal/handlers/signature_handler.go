@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"database/sql"
+	"errors"
 
 	"rms-backend/internal/repository"
 	"rms-backend/internal/utils"
@@ -36,10 +38,14 @@ func (h *SignatureHandler) Mine(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sig, err := h.repo.GetLatestByAdmin(r.Context(), adminID)
-	if err != nil {
-		utils.Error(w, http.StatusNotFound, "Anda belum memiliki tanda tangan terdaftar")
-		return
-	}
+		if errors.Is(err, sql.ErrNoRows) {
+			utils.Error(w, http.StatusNotFound, "Anda belum memiliki tanda tangan terdaftar")
+			return
+		}
+		if err != nil {
+			utils.Error(w, http.StatusInternalServerError, "Gagal mengambil tanda tangan")
+			return
+		}
 	utils.OK(w, "Fetch success", map[string]any{
 		"signature_id": sig.ID, "signature_file": sig.File, "signature_name_pic": sig.NamePic,
 	})

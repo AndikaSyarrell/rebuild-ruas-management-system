@@ -17,14 +17,22 @@ type CreatePRRequest struct {
 	Hpp               utils.FlexFloat            `json:"hpp"`
 	QoutNo            string                     `json:"qout_no"`
 	TargetInvoiceDate string                     `json:"target_invoice_date"`
-	RefPreviousPR     *utils.FlexInt             `json:"ref_previous_pr"`   // BARU
-	Payments          []CreatePRPaymentRequest   `json:"payments,omitempty"`
+	RefPreviousPR     *utils.FlexInt             `json:"ref_previous_pr"`   
+	Payments          []PRPaymentDraftRequest    `json:"payments,omitempty"`
+	Priority 		  string					 `json:"priority"`	
+	ConfirmJoinQuotation bool 					 `json:"confirm_join_quotation"`
+	PoNo 			  string 					 `json:"po_no"`
 }
 
 func (r *CreatePRRequest) Normalize() {
 	r.DescriptionItem = strings.TrimSpace(r.DescriptionItem)
 	r.SubClient = strings.TrimSpace(r.SubClient)
 	r.QoutNo = strings.TrimSpace(r.QoutNo)
+	r.Priority = strings.ToLower(strings.TrimSpace(r.Priority))
+	r.PoNo = strings.TrimSpace(r.PoNo)
+	if r.Priority == ""{
+		r.Priority = defaultPRPriority
+	}
 	for i := range r.Payments {
 		r.Payments[i].Normalize()
 	}
@@ -33,6 +41,12 @@ func (r *CreatePRRequest) Normalize() {
 func (r CreatePRRequest) Validate() error {
 	if int(r.RefResponsible) == 0 {
 		return errors.New("responsible (CoA) wajib dipilih")
+	}
+	if len(r.PoNo) > 196 {
+		return errors.New("nomor po maksimal 196 karakter")
+	}
+	if !validPRPriority[r.Priority]{
+		return errors.New("Priority harus salah satu dari low, medium, atau high")
 	}
 	if r.DescriptionItem == "" {
 		return errors.New("deskripsi item wajib diisi")
@@ -63,14 +77,16 @@ func (r CreatePRRequest) RefPreviousPRPtr() *int {
 }
 
 type UpdatePRRequest struct {
-	RefResponsible    utils.FlexInt   `json:"ref_responsible"`
-	DescriptionItem   string          `json:"description_item"`
-	SubClient         string          `json:"sub_client"`
-	RequestedAmount   utils.FlexFloat `json:"requested_amount"`
-	QoutNo            string          `json:"qout_no"`
-	TargetInvoiceDate string          `json:"target_invoice_date"`
-	RefPreviousPR     *utils.FlexInt  `json:"ref_previous_pr"` // BARU — bisa diedit
-	Payments []CreatePRPaymentRequest `json:"payments,omitempty"`
+	RefResponsible       utils.FlexInt            `json:"ref_responsible"`
+	DescriptionItem      string                   `json:"description_item"`
+	SubClient            string                   `json:"sub_client"`
+	RequestedAmount      utils.FlexFloat          `json:"requested_amount"`
+	QoutNo               string                   `json:"qout_no"`
+	TargetInvoiceDate    string                   `json:"target_invoice_date"`
+	RefPreviousPR        *utils.FlexInt           `json:"ref_previous_pr"`
+	Payments             []PRPaymentDraftRequest  `json:"payments,omitempty"`
+	ConfirmJoinQuotation bool                     `json:"confirm_join_quotation"` // BARU
+	PoNo 				*string `json:"po_no"`
 }
 
 func (r UpdatePRRequest) RefPreviousPRPtr() *int {
@@ -85,6 +101,13 @@ func (r *UpdatePRRequest) Normalize() {
 	r.DescriptionItem = strings.TrimSpace(r.DescriptionItem)
 	r.SubClient = strings.TrimSpace(r.SubClient)
 	r.QoutNo = strings.TrimSpace(r.QoutNo)
+	if r.PoNo != nil {
+		v := strings.TrimSpace(*r.PoNo)
+		r.PoNo = &v
+	}
+	for i := range r.Payments { // BARU
+		r.Payments[i].Normalize()
+	}
 }
 
 func (r UpdatePRRequest) Validate() error {
@@ -96,6 +119,14 @@ func (r UpdatePRRequest) Validate() error {
 	}
 	if float64(r.RequestedAmount) < 0 {
 		return errors.New("jumlah permintaan tidak boleh negatif")
+	}
+	if r.PoNo != nil && len(*r.PoNo) > 196 {
+		return errors.New("nomor po maksimal 196 karakter")
+	}
+	for i, p := range r.Payments{
+		if err := p.Validate(); err != nil {
+			return errors.New("payment ke-" + itoa(i+1) + ":" + err.Error())
+		}
 	}
 	return nil
 }
@@ -123,34 +154,28 @@ func (r ApproverAssignmentRequest) Validate() error {
 
 
 type SubmitPRRequest struct {
-	Approvers []ApproverAssignmentRequest `json:"approvers"`
+	CheckerID   string        `json:"checker_id"`
+	SignatureID utils.FlexInt `json:"signature_id"`
 }
 
 
 func (r SubmitPRRequest) Validate() error {
-	return validateApproverAssignments(r.Approvers)
+	if strings.TrimSpace(r.CheckerID) == "" {
+		return errors.New("checker_id wajib diisi")
+	}
+	if int(r.SignatureID) == 0 {
+		return errors.New("signature_id wajib diisi")
+	}
+	return nil
 }
 
 type DecidePRApprovalRequest struct {
 	Notes string `json:"notes"`
 }
 
+const defaultPRPriority = "medium"
 
-type SetPriorityRequest struct {
-	Priority string `json:"priority"`
-}
-
-var validPRPriority = map[string]bool{"low": true, "medium": true, "high": true, "urgent": true}
-
-func (r SetPriorityRequest) Validate() error {
-	if r.Priority == "" {
-		return nil
-	}
-	if !validPRPriority[r.Priority] {
-		return errors.New("priority harus salah satu dari: low, medium, high, urgent, atau dikosongkan untuk unset")
-	}
-	return nil
-}
+var validPRPriority = map[string]bool{"low": true, "medium": true, "high": true}
 
 type PRCommentRequest struct {
 	Text string `json:"text"`
@@ -185,17 +210,16 @@ func (r UpdatePRAmountsRequest) Validate() error {
 	return nil
 }
 
-type CreatePRPaymentRequest struct {
+type PRPaymentDraftRequest struct {
 	Stage           string          `json:"stage"`
 	Amount          utils.FlexFloat `json:"amount"`
 	Type            string          `json:"type"`
 	Bank            string          `json:"bank"`
 	BankAccountNo   string          `json:"bank_account_no"`
 	BankAccountName string          `json:"bank_account_name"`
-	PriorityDate    string          `json:"priority_date"`
 }
 
-func (r *CreatePRPaymentRequest) Normalize() {
+func (r *PRPaymentDraftRequest) Normalize() {
 	r.Stage = strings.TrimSpace(r.Stage)
 	r.Type = strings.TrimSpace(r.Type)
 	r.Bank = strings.TrimSpace(r.Bank)
@@ -203,7 +227,7 @@ func (r *CreatePRPaymentRequest) Normalize() {
 	r.BankAccountName = strings.TrimSpace(r.BankAccountName)
 }
 
-func (r CreatePRPaymentRequest) Validate() error {
+func (r PRPaymentDraftRequest) Validate() error {
 	if r.Stage == "" {
 		return errors.New("payment_stage wajib diisi (mis. down_payment/full_payment/final_payment)")
 	}
@@ -214,6 +238,21 @@ func (r CreatePRPaymentRequest) Validate() error {
 		return errors.New("jumlah pembayaran harus lebih dari 0")
 	}
 	return nil
+}
+
+type CreatePRPaymentRequest struct {
+	PRPaymentDraftRequest
+	PriorityDate string `json:"priority_date"`
+}
+
+func (r *CreatePRPaymentRequest) Normalize() {
+	r.PRPaymentDraftRequest.Normalize()
+	r.PriorityDate = strings.TrimSpace(r.PriorityDate)
+}
+
+// SetPaymentPriorityDateRequest: "" = hapus tanggal prioritas.
+type SetPaymentPriorityDateRequest struct {
+	PriorityDate string `json:"priority_date"`
 }
 
 type CancelPRPaymentRequest struct {
@@ -267,16 +306,20 @@ func validateApproverAssignments(approvers []ApproverAssignmentRequest) error {
 }
 
 type BulkSubmitPRItem struct {
-	PRID      utils.FlexInt               `json:"pr_id"`
-	Approvers []ApproverAssignmentRequest `json:"approvers,omitempty"` // opsional, override default_approvers
+	PRID      utils.FlexInt `json:"pr_id"`
+	CheckerID string        `json:"checker_id,omitempty"` // override default_checker_id
 }
 
 type BulkSubmitPRRequest struct {
-	DefaultApprovers []ApproverAssignmentRequest `json:"default_approvers,omitempty"`
-	Items            []BulkSubmitPRItem          `json:"items"`
+	SignatureID      utils.FlexInt      `json:"signature_id"`
+	DefaultCheckerID string             `json:"default_checker_id,omitempty"`
+	Items            []BulkSubmitPRItem `json:"items"`
 }
 
 func (r BulkSubmitPRRequest) Validate() error {
+	if int(r.SignatureID) == 0 {
+		return errors.New("signature_id wajib diisi")
+	}
 	if len(r.Items) == 0 {
 		return errors.New("items wajib diisi minimal 1 purchase request")
 	}
@@ -293,13 +336,8 @@ func (r BulkSubmitPRRequest) Validate() error {
 			return fmt.Errorf("item ke-%d: pr_id %d duplikat dalam satu batch", i+1, id)
 		}
 		seenPR[id] = true
-
-		approvers := it.Approvers
-		if len(approvers) == 0 {
-			approvers = r.DefaultApprovers
-		}
-		if err := validateApproverAssignments(approvers); err != nil {
-			return fmt.Errorf("item ke-%d (pr_id=%d): %w", i+1, id, err)
+		if strings.TrimSpace(it.CheckerID) == "" && strings.TrimSpace(r.DefaultCheckerID) == "" {
+			return fmt.Errorf("item ke-%d (pr_id=%d): checker_id atau default_checker_id wajib diisi", i+1, id)
 		}
 	}
 	return nil

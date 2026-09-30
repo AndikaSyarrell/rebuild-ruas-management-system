@@ -128,7 +128,8 @@ const poDetailSelect = `
 	       po.po_paid, po.po_notes, po.po_date, po.po_exp_date, po.po_prepared_date, po.po_progress_date,
 	       po.po_complete_date, po.po_cancel_date, po.po_create_date, po.po_modify_date,
 	       COALESCE(ad.admin_name, ''), COALESCE(pic.admin_name, ''), COALESCE(picc.admin_name, ''),
-	       COALESCE(rg.region_title, ''), COALESCE(dv.division_title, ''), COALESCE(pp.ppn_value, 0)
+	       COALESCE(rg.region_title, ''), COALESCE(dv.division_title, ''), COALESCE(pp.ppn_value, 0),
+	       COALESCE(po.po_quot_no, '')
 	FROM T_Po po
 	LEFT JOIN T_Admin ad ON po.po_ref_admin = ad.admin_id
 	LEFT JOIN T_Admin pic ON po.po_ref_pic = pic.admin_id
@@ -148,11 +149,21 @@ func scanPO(row interface {
 		&v.PpnAmount, &v.Total, &v.ItemTotal, &v.Status, &v.Document, &v.Paid,
 		&v.Notes, &v.Date, &v.ExpDate, &v.PreparedDate, &v.ProgressDate,
 		&v.CompleteDate, &v.CancelDate, &v.CreateDate, &v.ModifyDate,
-		&v.AdminName, &v.PicName, &v.PicClientName, &v.RegionTitle, &v.DivisionName, &v.PpnValue)
+		&v.AdminName, &v.PicName, &v.PicClientName, &v.RegionTitle, &v.DivisionName, &v.PpnValue,
+		&v.QuotHint)
 	if err != nil {
 		return nil, err
 	}
 	return &v, nil
+}
+
+func (r *PORepo) UpdateQuotHint(ctx context.Context, id, hint string) error {
+	var arg interface{}
+	if hint != ""{
+		arg = hint
+	}
+	_, err := r.db.ExecContext(ctx, `UPDATE T_Po SET po_quot_no = ? WHERE po_id = ?`, arg, id)
+	return err
 }
 
 func (r *PORepo) GetDetail(ctx context.Context, id string) (*models.PO, error) {
@@ -881,6 +892,92 @@ func (r *PORepo) CountByFilter(ctx context.Context, f ListFilter) (map[string]in
 			return nil, err
 		}
 		out[status] = count
+	}
+	return out, rows.Err()
+}
+
+func (r *PORepo) DeleteWithQuotationCascade(ctx context.Context, poID, adminID, note string) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil{
+		return err
+	}
+
+	defer tx.Rollback()
+
+	steps := []struct {
+		query string
+		args  []interface{}
+	}{
+		{`INSERT INTO T_Pr_Comment (comment_ref_admin, comment_ref_pr, comment_text, comment_type, comment_create_date)
+		SELECT ?, pr.pr_id, ?, 'po_unlink', NOW()
+		FROM T_Purchase_Request pr
+		JOIN T_Pr_Quotation q ON pr.pr_ref_quotation = q.quotation_id
+		WHERE q.quotation_ref_po = ?`, []interface{}{adminID, note, poID}},
+		{`UPDATE T_Purchase_Request pr
+		JOIN T_Pr_Quotation q ON pr.pr_ref_quotation = q.quotation_id
+		SET pr.pr_po_no = NULL
+		WHERE q.quotation_ref_po = ?`, []interface{}{poID}},
+		// dua step berikutnya (UPDATE T_Pr_Quotation, DELETE T_Po) tidak berubah
+		{`Update T_Pr_Quotation
+		Set quotation_ref_po = NULL, quotation_revoke_ref_admin = ?, quotation_revoke_date = NOW()
+		Where quotation_ref_po = ?`, []interface{}{adminID, poID}},
+		{`Delete From T_Po Where po_id = ?`, []interface{}{poID}},
+	}
+
+	for _, s := range steps {
+		if _, err := tx.ExecContext(ctx, s.query, s.args...); err != nil{
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (r *PORepo) GetByOrderNum(ctx context.Context, orderNum string) (*models.PO, error) {
+	row := r.db.QueryRowContext(ctx, poDetailSelect+" WHERE po.po_order_num = ?", orderNum)
+	return scanPO(row)
+}
+
+// POLinkOption adalah baris ringan untuk dropdown nomor PO di form PR.
+type POLinkOption struct {
+	ID                 string
+	OrderNum           string
+	Status             string
+	SubClient          string
+	ClientName         string
+	QuotHint           string
+	LinkedQuotationNos string // dipisah "||", di-split di layer DTO
+}
+
+// SearchForLinking: semua PO selain 'cancel' (PO complete tetap muncul karena
+// grup quotation yang ter-link bisa saja menunjuk ke PO yang sudah complete).
+func (r *PORepo) SearchForLinking(ctx context.Context, keyword string, limit int) ([]POLinkOption, error) {
+	like := "%" + keyword + "%"
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT po.po_id, po.po_order_num, po.po_status, COALESCE(po.po_subclient, ''),
+		       COALESCE(cl.client_name, ''), COALESCE(po.po_quot_no, ''),
+		       COALESCE((SELECT GROUP_CONCAT(q.quotation_no ORDER BY q.quotation_link_date SEPARATOR '||')
+		                 FROM T_Pr_Quotation q WHERE q.quotation_ref_po = po.po_id), '')
+		FROM T_Po po
+		LEFT JOIN T_Client cl ON po.po_ref_client = cl.client_id
+		WHERE po.po_status IN ('prepared', 'progress', 'complete')
+		  AND (? = '' OR po.po_order_num LIKE ? OR po.po_quot_no LIKE ?
+		       OR po.po_subclient LIKE ? OR cl.client_name LIKE ?
+		       OR EXISTS (SELECT 1 FROM T_Po_Item it WHERE it.item_ref_po = po.po_id AND it.item_product LIKE ?))
+		ORDER BY po.po_date DESC, po.po_create_date DESC
+		LIMIT ?`, keyword, like, like, like, like, like, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []POLinkOption
+	for rows.Next() {
+		var v POLinkOption
+		if err := rows.Scan(&v.ID, &v.OrderNum, &v.Status, &v.SubClient, &v.ClientName,
+			&v.QuotHint, &v.LinkedQuotationNos); err != nil {
+			return nil, err
+		}
+		out = append(out, v)
 	}
 	return out, rows.Err()
 }

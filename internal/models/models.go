@@ -160,6 +160,7 @@ type PO struct {
 	ClientPhone   string     `json:"po_client_phone" db:"po_client_phone"`
 	ClientAddr    string     `json:"po_client_address" db:"po_client_address"`
 	SubClient     *string    `json:"po_subclient" db:"po_subclient"`
+	QuotHint      string     `json:"po_quot_no,omitempty" db:"po_quot_no"` // BARU - PR-PO Linking, hint pencarian saja (bukan FK)
 	Subtotal      float64    `json:"po_subtotal" db:"po_subtotal"`
 	PpnRate       float64    `json:"po_ppn_rate" db:"po_ppn_rate"`
 	PpnAmount     float64    `json:"po_ppn_amount" db:"po_ppn_amount"`
@@ -265,6 +266,9 @@ type PurchaseRequest struct {
 	RefPreviousPR *int   `json:"pr_ref_previous_pr" db:"pr_ref_previous_pr"`       // BARU
 	PreviousRfpNo string `json:"previous_rfp_no,omitempty" db:"previous_rfp_no"`  // BARU, hasil JOIN
 
+	RefQuotation  *int   `json:"pr_ref_quotation" db:"pr_ref_quotation"`           // BARU - PR-PO Linking
+	QuotationNo   string `json:"quotation_no,omitempty" db:"quotation_no"`         // BARU, hasil JOIN (nomor ter-normalisasi)
+
 	Margin           float64 `json:"pr_margin,omitempty" db:"-"`
 	MarginPercentage float64 `json:"pr_margin_percentage,omitempty" db:"-"`
 
@@ -283,7 +287,7 @@ type AdminSignature struct {
 
 type PRApproval struct {
 	ID         int       `json:"approval_id" db:"approval_id"`
-	RefAdmin   string    `json:"approval_ref_admin" db:"approval_ref_admin"`
+	RefAdmin   *string    `json:"approval_ref_admin" db:"approval_ref_admin"`
 	RefPR      int       `json:"approval_ref_pr" db:"approval_ref_pr"`
 	Level      int       `json:"approval_level" db:"approval_level"`
 	Type       string    `json:"approval_type" db:"approval_type"`
@@ -298,6 +302,24 @@ type PRApproval struct {
 	SignatureFile string `json:"signature_file,omitempty" db:"signature_file"`
 
 	AdminName string `json:"admin_name,omitempty" db:"admin_name"`
+	DecidedDate *time.Time `json:"approval_decided_date" db:"approval_decided_date"`
+}
+
+type PRCancelRequest struct {
+	ID            int        `json:"cancel_id" db:"cancel_id"`
+	RefPR         int        `json:"cancel_ref_pr" db:"cancel_ref_pr"`
+	RefAdmin      string     `json:"cancel_ref_admin" db:"cancel_ref_admin"`
+	Reason        string     `json:"cancel_reason" db:"cancel_reason"`
+	DocumentName  string     `json:"cancel_document_name" db:"cancel_document_name"`
+	DocumentPath  string     `json:"cancel_document_path" db:"cancel_document_path"`
+	Status        string     `json:"cancel_status" db:"cancel_status"`
+	RefAdminReview *string   `json:"cancel_ref_admin_review" db:"cancel_ref_admin_review"`
+	ReviewNotes   *string    `json:"cancel_review_notes" db:"cancel_review_notes"`
+	ReviewDate    *time.Time `json:"cancel_review_date" db:"cancel_review_date"`
+	CreateDate    time.Time  `json:"cancel_create_date" db:"cancel_create_date"`
+
+	RequesterName string `json:"requester_name,omitempty" db:"requester_name"`
+	ReviewerName  string `json:"reviewer_name,omitempty" db:"reviewer_name"`
 }
 
 type PRStatusHistory struct {
@@ -354,6 +376,20 @@ type PRPayment struct {
 
 	AdminInputName string `json:"admin_input_name,omitempty" db:"admin_input_name"`
 	AdminPaidName  string `json:"admin_paid_name,omitempty" db:"admin_paid_name"`
+}
+
+type PRQuotation struct {
+	ID             int        `json:"quotation_id" db:"quotation_id"`
+	No             string     `json:"quotation_no" db:"quotation_no"` // ter-normalisasi: trim + uppercase
+	RefPO          *string    `json:"quotation_ref_po" db:"quotation_ref_po"`
+	LinkRefAdmin   *string    `json:"quotation_link_ref_admin" db:"quotation_link_ref_admin"`
+	LinkDate       *time.Time `json:"quotation_link_date" db:"quotation_link_date"`
+	RevokeRefAdmin *string    `json:"quotation_revoke_ref_admin" db:"quotation_revoke_ref_admin"`
+	RevokeDate     *time.Time `json:"quotation_revoke_date" db:"quotation_revoke_date"`
+	CreateDate     time.Time  `json:"quotation_create_date" db:"quotation_create_date"`
+
+	// Hasil agregasi opsional, diisi oleh query kandidat/detail (bukan kolom DB).
+	POOrderNum string `json:"po_order_num,omitempty" db:"-"`
 }
 
 type Responsible struct {

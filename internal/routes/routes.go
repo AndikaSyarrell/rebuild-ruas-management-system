@@ -48,6 +48,7 @@ type Dependencies struct {
 	DocumentHandler  *handlers.DocumentHandler
 	DashboardHandler *handlers.DashboardHandler
 	ReportHandler    *handlers.ReportHandler
+	PRCancelHandler *handlers.PRCancelHandler
 }
 
 // corsMiddleware adalah implementasi CORS minimal (tanpa dependency eksternal)
@@ -91,6 +92,10 @@ func New(d *Dependencies) http.Handler {
 	auth := middleware.Auth(d.JWTManager, d.AuthService)
 	requireAccess := func(slug string) func(http.Handler) http.Handler {
 		return middleware.RequireAccess(d.AccessRepo, slug)
+	}
+
+	requireAny := func(slugs ...string) func(http.Handler) http.Handler {
+		return middleware.RequireAnyAccess(d.AccessRepo, slugs...)
 	}
 
 	r.Handle("/docs/*", http.StripPrefix("/docs/", http.FileServer(http.Dir("./docs"))))
@@ -211,6 +216,7 @@ func New(d *Dependencies) http.Handler {
 			rt.Get("/", d.AdminHandler.List)
 			rt.Get("/pic", d.AdminHandler.ListPIC)
 			rt.Get("/pic-client", d.AdminHandler.ListPICClient)
+			rt.Get("/checkers", d.AdminHandler.ListCheckers)
 			rt.Get("/{id}", d.AdminHandler.Detail)
 			rt.Get("/me/signature", d.SignatureHandler.Mine)
 			rt.Post("/me/signature", d.SignatureHandler.Upload)
@@ -255,6 +261,12 @@ func New(d *Dependencies) http.Handler {
 			rt.With(requireAccess("edit_po")).Put("/items/{itemId}", d.POHandler.UpdateItem)
 			rt.With(requireAccess("edit_po")).Delete("/items/{itemId}", d.POHandler.DeleteItem)
 
+			rt.With(requireAccess("link_pr_po")).Get("/{id}/quotation-candidates", d.POHandler.QuotationCandidates)
+			rt.With(requireAccess("link_pr_po")).Post("/{id}/link-quotation", d.POHandler.LinkQuotation)
+			rt.With(requireAccess("unlink_pr_po")).Post("/{id}/unlink-quotation", d.POHandler.UnlinkQuotation)
+
+			rt.With(requireAccess("edit_po")).Post("/{id}/quot-hint", d.POHandler.UpdateQuotHint)
+
 			rt.Get("/{id}/activities", d.ActivityHandler.ListByPO)
 			rt.With(requireAccess("create_notes")).Post("/{id}/notes-activity", d.ActivityHandler.AddNote)
 
@@ -271,7 +283,14 @@ func New(d *Dependencies) http.Handler {
 			rt.With(requireAccess("export_pr")).Get("/{id}/export", d.PRHandler.ExportRFP)
 			rt.With(requireAccess("create_pr")).Post("/", d.PRHandler.Create)
 			rt.With(requireAccess("edit_pr")).Put("/{id}", d.PRHandler.Update)
-			rt.Post("/{id}/cancel", d.PRHandler.Cancel)
+			rt.Post("/{id}/cancel", d.PRCancelHandler.Cancel)
+			rt.Post("/{id}/cancel-request", d.PRCancelHandler.CreateRequest)
+			rt.Get("/{id}/cancel-requests", d.PRCancelHandler.ListByPR)
+
+			rt.With(requireAccess("finance")).Get("/cancel-requests", d.PRCancelHandler.ListForFinance)
+			rt.Get("/cancel-requests/{cancelId}/document", d.PRCancelHandler.Document)
+			rt.With(requireAccess("finance")).Post("/cancel-requests/{cancelId}/approve", d.PRCancelHandler.Approve)
+			rt.With(requireAccess("finance")).Post("/cancel-requests/{cancelId}/reject", d.PRCancelHandler.Reject)
 			
 			rt.Get("/{id}/documents", d.PRDocumentHandler.ListByPR)
 			rt.Post("/{id}/documents", d.PRDocumentHandler.Upload)
@@ -284,12 +303,16 @@ func New(d *Dependencies) http.Handler {
 			rt.Get("/{id}/approvals", d.PRHandler.ListApprovals)
 			rt.With(requireAccess("submit_pr")).Post("/{id}/submit", d.PRHandler.Submit)
 			rt.With(requireAccess("submit_pr")).Post("/bulk-submit", d.PRHandler.BulkSubmit)
-			rt.With(requireAccess("set_pr_priority")).Post("/{id}/priority", d.PRHandler.SetPriority)
+			rt.With(requireAccess("create_pr_payment"), requireAccess("finance")).Post("/{id}/payments", d.PRPaymentHandler.Create)
+			rt.With(requireAccess("finance")).Post("/payments/{paymentId}/priority-date", d.PRPaymentHandler.SetPriorityDate)
 			
 			rt.Get("/my-approvals", d.PRHandler.MyTurn)
-			rt.With(requireAccess("approve_pr")).Post("/approvals/{approvalId}/approve", d.PRHandler.ApproveApproval)
-			rt.With(requireAccess("approve_pr")).Post("/approvals/bulk-decide", d.PRHandler.BulkDecide)
-			rt.With(requireAccess("approve_pr")).Post("/approvals/{approvalId}/reject", d.PRHandler.RejectApproval)
+			rt.Get("/my-decisions", d.PRHandler.MyDecisions)
+			rt.With(requireAccess("create_pr")).Get("/quotations", d.PRHandler.SearchQuotations)
+			rt.With(requireAny("checker", "director", "finance")).Post("/approvals/{approvalId}/approve", d.PRHandler.ApproveApproval)
+			rt.With(requireAny("checker", "director", "finance")).Post("/approvals/bulk-decide", d.PRHandler.BulkDecide)
+			rt.With(requireAny("checker", "director", "finance")).Post("/approvals/{approvalId}/reject", d.PRHandler.RejectApproval)
+			rt.With(requireAccess("checker")).Post("/approvals/{approvalId}/request-revision", d.PRHandler.RequestRevision)
 			
 			rt.Get("/{id}/comments", d.PRHandler.ListComments)
 			rt.Post("/{id}/comments", d.PRHandler.AddComment)
@@ -315,9 +338,6 @@ func New(d *Dependencies) http.Handler {
 			rt.With(requireAccess("change_stat_responsible")).Post("/{id}/deactivate", d.ResponsibleHandler.Deactivate)
 		})
 
-		// Dashboard & activity feed: read-only, konsisten dengan pola GET list
-		// di modul lain (region/client/po) yang cukup butuh login, tanpa
-		// RequireAccess tambahan. Ini keputusan SENGAJA, bukan kelupaan.
 		api.Get("/activities/dashboard", d.ActivityHandler.Dashboard)
 		api.Get("/dashboard", d.DashboardHandler.Summary)
 

@@ -41,6 +41,26 @@ func (h *AdminHandler) List(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// GET /api/admins/checkers - dropdown checker saat submit PR (tanpa diri sendiri)
+func (h *AdminHandler) ListCheckers(w http.ResponseWriter, r *http.Request) {
+	list, err := h.repo.ListByAccessSlug(r.Context(), "checker")
+	if err != nil {
+		utils.Error(w, http.StatusInternalServerError, "Gagal mengambil daftar checker")
+		return
+	}
+	actorID, _ := actorFromContext(r.Context())
+	out := make([]map[string]any, 0, len(list))
+	for _, a := range list {
+		if a.ID == actorID {
+			continue
+		}
+		out = append(out, map[string]any{
+			"admin_id": a.ID, "admin_name": a.Name, "division_title": a.DivisionTitle,
+		})
+	}
+	utils.OK(w, "Fetch success", out)
+}
+
 func (h *AdminHandler) Detail(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	admin, err := h.repo.GetByID(r.Context(), id)

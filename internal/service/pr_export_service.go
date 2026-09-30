@@ -109,7 +109,14 @@ func (s *PRExportService) GenerateRFPDocx(ctx context.Context, prID int) ([]byte
 		quotNo = *pr.QoutNo
 	}
 
+	if quotNo == ""{
+		quotNo = pr.QuotationNo
+	}
+
 	poNoDisplay := "PO BELUM RELEASE"
+	if pr.PoNo != nil && strings.TrimSpace(*pr.PoNo) != ""{
+		poNoDisplay = *pr.PoNo
+	}
 
 	var assets []signatureAsset
 	attach := func(relFile string) string {

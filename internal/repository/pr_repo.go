@@ -19,15 +19,16 @@ const prDetailSelect = `
 	       pr.pr_description_item, pr.pr_subclient, pr.pr_requested_amount, pr.pr_qout_no,
 	       pr.pr_po_amount, pr.pr_hpp, pr.pr_target_invoice_date, pr.pr_status, pr.pr_priority,
 	       pr.pr_priority_ref_admin, pr.pr_priority_date, pr.pr_signature_ref,
-	       pr.pr_ref_previous_pr, pr.pr_po_no,
+	       pr.pr_ref_previous_pr, pr.pr_po_no, pr.pr_ref_quotation,
 	       pr.pr_create_date, pr.pr_modify_date,
 	       COALESCE(ad.admin_name, ''), COALESCE(rp.responsible_name, ''), COALESCE(sg.signature_file, ''),
-	       COALESCE(prev.pr_rfp_no, '')
+	       COALESCE(prev.pr_rfp_no, ''), COALESCE(q.quotation_no, '')
 	FROM T_Purchase_Request pr
 	LEFT JOIN T_Admin ad ON pr.pr_ref_admin = ad.admin_id
 	LEFT JOIN T_Responsible rp ON pr.pr_ref_responsible = rp.responsible_id
 	LEFT JOIN T_Admin_Signature sg ON pr.pr_signature_ref = sg.signature_id
 	LEFT JOIN T_Purchase_Request prev ON pr.pr_ref_previous_pr = prev.pr_id
+	LEFT JOIN T_Pr_Quotation q ON pr.pr_ref_quotation = q.quotation_id
 `
 
 func scanPR(row interface{ Scan(dest ...interface{}) error }) (*models.PurchaseRequest, error) {
@@ -36,9 +37,9 @@ func scanPR(row interface{ Scan(dest ...interface{}) error }) (*models.PurchaseR
 		&v.DescriptionItem, &v.SubClient, &v.RequestedAmount, &v.QoutNo,
 		&v.PoAmount, &v.Hpp, &v.TargetInvoiceDate, &v.Status, &v.Priority,
 		&v.PriorityRefAdmin, &v.PriorityDate, &v.SignatureRef,
-		&v.RefPreviousPR, &v.PoNo,
+		&v.RefPreviousPR, &v.PoNo, &v.RefQuotation,
 		&v.CreateDate, &v.ModifyDate,
-		&v.AdminName, &v.ResponsibleName, &v.SignatureFile, &v.PreviousRfpNo)
+		&v.AdminName, &v.ResponsibleName, &v.SignatureFile, &v.PreviousRfpNo, &v.QuotationNo)
 	if err != nil {
 		return nil, err
 	}
@@ -50,14 +51,18 @@ func (r *PRRepo) GetByID(ctx context.Context, id int) (*models.PurchaseRequest, 
 	return scanPR(row)
 }
 
-func (r *PRRepo) ListPaged(ctx context.Context, page, perPage int) ([]models.PurchaseRequest, int, error) {
+func (r *PRRepo) ListPaged(ctx context.Context, page, perPage int, adminID string) ([]models.PurchaseRequest, int, error) {
+	where := " WHERE " + prVisibleClause
+
 	var total int
-	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM T_Purchase_Request`).Scan(&total); err != nil {
+	if err := r.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM T_Purchase_Request pr`+where, prViewerArgs(adminID)...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
-	offset := (page - 1) * perPage
+
+	args := append(prViewerArgs(adminID), perPage, (page-1)*perPage)
 	rows, err := r.db.QueryContext(ctx,
-		prDetailSelect+" ORDER BY pr.pr_create_date DESC LIMIT ? OFFSET ?", perPage, offset)
+		prDetailSelect+where+" ORDER BY pr.pr_create_date DESC LIMIT ? OFFSET ?", args...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -74,12 +79,12 @@ func (r *PRRepo) ListPaged(ctx context.Context, page, perPage int) ([]models.Pur
 	return out, total, rows.Err()
 }
 
-func (r *PRRepo) ListByStatus(ctx context.Context, statuses []string) ([]models.PurchaseRequest, error) {
+func (r *PRRepo) ListByStatus(ctx context.Context, statuses []string, adminID string) ([]models.PurchaseRequest, error) {
 	if len(statuses) == 0 {
 		return nil, nil
 	}
 	placeholders := ""
-	args := make([]interface{}, 0, len(statuses))
+	args := make([]interface{}, 0, len(statuses)+prViewerArgCount)
 	for i, s := range statuses {
 		if i > 0 {
 			placeholders += ","
@@ -87,8 +92,9 @@ func (r *PRRepo) ListByStatus(ctx context.Context, statuses []string) ([]models.
 		placeholders += "?"
 		args = append(args, s)
 	}
+	args = append(args, prViewerArgs(adminID)...)
 
-	query := prDetailSelect + " WHERE pr.pr_status IN (" + placeholders + ") ORDER BY pr.pr_create_date ASC"
+	query := prDetailSelect + " WHERE pr.pr_status IN (" + placeholders + ") AND " + prVisibleClause + " ORDER BY pr.pr_create_date ASC"
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -128,14 +134,20 @@ type PRInput struct {
 	QoutNo            string
 	TargetInvoiceDate string
 	SignatureRef      int
-	RefPreviousPR     *int             // BARU
-	Payments          []PRPaymentDraft // BARU
+	RefPreviousPR     *int
+	Payments          []PRPaymentDraft
+	RefQuotation      *int            
+	Priority 		  string
+	PoNo 			  *string
 }
 
 func (r *PRRepo) Create(ctx context.Context, in PRInput) (int64, error) {
-	var subClient, qoutNo, targetInvoiceDate, signatureRef, refPreviousPR interface{}
+	var subClient, qoutNo, targetInvoiceDate, signatureRef, refPreviousPR, refQuotation, poNo interface{}
 	if in.SubClient != "" {
 		subClient = in.SubClient
+	}
+	if in.PoNo != nil && *in.PoNo != "" {
+		poNo = *in.PoNo
 	}
 	if in.QoutNo != "" {
 		qoutNo = in.QoutNo
@@ -149,6 +161,9 @@ func (r *PRRepo) Create(ctx context.Context, in PRInput) (int64, error) {
 	if in.RefPreviousPR != nil {
 		refPreviousPR = *in.RefPreviousPR
 	}
+	if in.RefQuotation != nil {
+		refQuotation = *in.RefQuotation
+	}
 
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -159,12 +174,13 @@ func (r *PRRepo) Create(ctx context.Context, in PRInput) (int64, error) {
 	res, err := tx.ExecContext(ctx, `
 		INSERT INTO T_Purchase_Request (pr_ref_admin, pr_ref_responsible, pr_rfp_no,
 		 pr_description_item, pr_subclient, pr_requested_amount, pr_po_amount, pr_hpp,
-		 pr_qout_no, pr_signature_ref, pr_target_invoice_date, pr_ref_previous_pr,
-		 pr_status, pr_create_date)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', NOW())`,
+		 pr_qout_no, pr_signature_ref, pr_target_invoice_date, pr_ref_previous_pr, pr_ref_quotation,
+		 pr_priority, pr_po_no, pr_status, pr_create_date)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', NOW())`,
 		in.RefAdmin, in.RefResponsible, in.RfpNo,
 		in.DescriptionItem, subClient, in.RequestedAmount, in.PoAmount, in.Hpp,
-		qoutNo, signatureRef, targetInvoiceDate, refPreviousPR)
+		qoutNo, signatureRef, targetInvoiceDate, refPreviousPR, refQuotation,
+		in.Priority, poNo)
 	if err != nil {
 		return 0, err
 	}
@@ -234,7 +250,14 @@ func (r *PRDocumentRepo) ExistsByPRAndType(ctx context.Context, prID int, docTyp
 }
 
 func (r *PRRepo) Update(ctx context.Context, id int, in PRInput) error {
-	var subClient, qoutNo, targetInvoiceDate, refPreviousPR interface{}
+	var subClient, qoutNo, targetInvoiceDate, refPreviousPR, refQuotation, poNoVal interface{}
+	poNoSet := false
+	if in.PoNo != nil {
+		poNoSet = true
+		if *in.PoNo != "" {
+			poNoVal = *in.PoNo
+		}
+	}
 	if in.SubClient != "" {
 		subClient = in.SubClient
 	}
@@ -247,14 +270,18 @@ func (r *PRRepo) Update(ctx context.Context, id int, in PRInput) error {
 	if in.RefPreviousPR != nil {
 		refPreviousPR = *in.RefPreviousPR
 	}
+	if in.RefQuotation != nil {
+		refQuotation = *in.RefQuotation
+	}
 
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE T_Purchase_Request SET pr_ref_responsible = ?, pr_description_item = ?,
 		 pr_subclient = ?, pr_requested_amount = ?, pr_qout_no = ?, pr_target_invoice_date = ?,
-		 pr_ref_previous_pr = ?
+		 pr_ref_previous_pr = ?, pr_ref_quotation = ?, pr_po_no = IF(?, ?, pr_po_no)
 		WHERE pr_id = ?`,
 		in.RefResponsible, in.DescriptionItem, subClient,
-		in.RequestedAmount, qoutNo, targetInvoiceDate, refPreviousPR, id)
+		in.RequestedAmount, qoutNo, targetInvoiceDate, refPreviousPR, refQuotation,
+		poNoSet, poNoVal, id)
 	return err
 }
 
@@ -290,25 +317,25 @@ func (r *PRRepo) UpdateStatus(ctx context.Context, id int, status string) error 
 	return err
 }
 
-func (r *PRRepo) UpdatePriority(ctx context.Context, id int, priority, setByAdminID string) error {
-	var p interface{}
-	if priority != "" {
-		p = priority
-	}
-	_, err := r.db.ExecContext(ctx,
-		`UPDATE T_Purchase_Request SET pr_priority = ?, pr_priority_ref_admin = ?, pr_priority_date = NOW() WHERE pr_id = ?`,
-		p, setByAdminID, id)
-	return err
-}
-
 func (r *PRRepo) UpdateAmounts(ctx context.Context, id int, poAmount, hpp float64, poNo string) error {
-	var poNoArg interface{}
-	if poNo != "" {
-		poNoArg = poNo
+	if poNo == "" {
+		_, err := r.db.ExecContext(ctx,
+			`UPDATE T_Purchase_Request SET pr_po_amount = ?, pr_hpp = ? WHERE pr_id = ?`,
+			poAmount, hpp, id)
+		return err
 	}
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE T_Purchase_Request SET pr_po_amount = ?, pr_hpp = ?, pr_po_no = ? WHERE pr_id = ?`,
-		poAmount, hpp, poNoArg, id)
+		poAmount, hpp, poNo, id)
+	return err
+}
+
+func (r *PRRepo) SyncPoNo(ctx context.Context, id int, poNo string) error {
+	var arg interface{}
+	if poNo != "" {
+		arg = poNo
+	}
+	_, err := r.db.ExecContext(ctx, `UPDATE T_Purchase_Request SET pr_po_no = ? WHERE pr_id = ?`, arg, id)
 	return err
 }
 
@@ -463,18 +490,29 @@ func (r *PRCommentRepo) ListByPR(ctx context.Context, prID int) ([]models.PRComm
 
 func (r *PRApprovalRepo) ListPendingByApprover(ctx context.Context, adminID string) ([]models.PRApproval, error) {
 	rows, err := r.db.QueryContext(ctx, prApprovalSelect+`
-		WHERE a.approval_ref_admin = ? AND a.approval_status = 'pending'
+		JOIN T_Purchase_Request pr ON pr.pr_id = a.approval_ref_pr
+		WHERE a.approval_status = 'pending'
+		  AND pr.pr_status = 'submitted'
 		  AND a.approval_round = (
-		        SELECT MAX(approval_round) FROM T_Pr_Approval WHERE approval_ref_pr = a.approval_ref_pr
-		  )
+		        SELECT MAX(approval_round) FROM T_Pr_Approval WHERE approval_ref_pr = a.approval_ref_pr)
 		  AND (a.approval_level = 1 OR EXISTS (
 		        SELECT 1 FROM T_Pr_Approval prev
 		        WHERE prev.approval_ref_pr = a.approval_ref_pr
 		          AND prev.approval_round = a.approval_round
 		          AND prev.approval_level = a.approval_level - 1
-		          AND prev.approval_status = 'approved'
-		  ))
-		ORDER BY a.approval_create_date ASC`, adminID)
+		          AND prev.approval_status = 'approved'))
+		  AND (
+		        (a.approval_level = 1 AND a.approval_ref_admin = ?)
+		     OR (a.approval_level > 1 AND pr.pr_ref_admin <> ?
+		         AND (a.approval_ref_admin = ?
+		              OR (a.approval_ref_admin IS NULL AND EXISTS (
+		                    SELECT 1 FROM T_Admin ad
+		                    JOIN T_Role_Access ra ON ra.role_access_ref_role = ad.admin_ref_role
+		                    JOIN T_Access ac ON ac.access_id = ra.role_access_ref_access
+		                    WHERE ad.admin_id = ? AND ad.admin_active = 'active'
+		                      AND ac.access_slug = a.approval_type))))
+		  )
+		ORDER BY a.approval_create_date ASC`, adminID, adminID, adminID, adminID)
 	if err != nil {
 		return nil, err
 	}
@@ -484,21 +522,51 @@ func (r *PRApprovalRepo) ListPendingByApprover(ctx context.Context, adminID stri
 
 func (r *PRRepo) IsAdminRelated(ctx context.Context, prID int, adminID string) (bool, error) {
 	var dummy int
-	err := r.db.QueryRowContext(ctx, `
-		SELECT 1 FROM (
-			SELECT 1 FROM T_Purchase_Request WHERE pr_id = ? AND pr_ref_admin = ?
-			UNION
-			SELECT 1 FROM T_Pr_Approval WHERE approval_ref_pr = ? AND approval_ref_admin = ?
-			UNION
-			SELECT 1 FROM T_Pr_Payment WHERE payment_ref_pr = ?
-			  AND (payment_ref_admin_input = ? OR payment_ref_admin_paid = ?)
-		) AS related LIMIT 1`,
-		prID, adminID, prID, adminID, prID, adminID, adminID).Scan(&dummy)
-	if err == sql.ErrNoRows {
+	args := append([]interface{}{prID}, prViewerArgs(adminID)...)
+	err := r.db.QueryRowContext(ctx,
+		`SELECT 1 FROM T_Purchase_Request pr WHERE pr.pr_id = ? AND `+prVisibleClause+` LIMIT 1`,
+		args...).Scan(&dummy)
+	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
 	return true, nil
+}
+
+// slugExistsPrefix: cek apakah aktor (placeholder ?) aktif dan punya slug; slug ditutup pemanggil.
+const slugExistsPrefix = `EXISTS (
+		SELECT 1 FROM T_Admin vad
+		JOIN T_Role_Access vra ON vra.role_access_ref_role = vad.admin_ref_role
+		JOIN T_Access vac ON vac.access_id = vra.role_access_ref_access
+		WHERE vad.admin_id = ? AND vad.admin_active = 'active' AND vac.access_slug = `
+
+// prVisibleClause: satu-satunya sumber kebenaran "siapa boleh melihat PR ini".
+// Butuh prViewerArgCount placeholder, semuanya diisi admin_id aktor (lihat prViewerArgs).
+const prVisibleClause = `(
+	pr.pr_ref_admin = ?
+	OR EXISTS (SELECT 1 FROM T_Pr_Approval va
+	           WHERE va.approval_ref_pr = pr.pr_id AND va.approval_ref_admin = ?)
+	OR EXISTS (SELECT 1 FROM T_Pr_Payment vp
+	           WHERE vp.payment_ref_pr = pr.pr_id
+	             AND (vp.payment_ref_admin_input = ? OR vp.payment_ref_admin_paid = ?))
+	OR (` + slugExistsPrefix + `'director')
+	    AND EXISTS (SELECT 1 FROM T_Pr_Approval v1
+	                WHERE v1.approval_ref_pr = pr.pr_id AND v1.approval_level = 1 AND v1.approval_status = 'approved'))
+	OR (` + slugExistsPrefix + `'finance')
+	    AND EXISTS (SELECT 1 FROM T_Pr_Approval v2
+	                WHERE v2.approval_ref_pr = pr.pr_id AND v2.approval_level = 2 AND v2.approval_status = 'approved'))
+		OR (` + slugExistsPrefix + `'finance')
+	    AND EXISTS (SELECT 1 FROM T_Pr_Cancel_Request vc WHERE vc.cancel_ref_pr = pr.pr_id))
+)`
+
+const prViewerArgCount = 7 
+
+func prViewerArgs(adminID string) []interface{} {
+	out := make([]interface{}, prViewerArgCount)
+	for i := range out {
+		out[i] = adminID
+	}
+	return out
 }
