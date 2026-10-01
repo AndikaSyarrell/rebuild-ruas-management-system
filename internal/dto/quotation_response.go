@@ -74,3 +74,48 @@ func NewLinkedQuotationResponse(q models.PRQuotation, members []repository.Quota
 		QuotationID: q.ID, QuotationNo: q.No, LinkedBy: linkedBy, LinkDate: linkDate, Members: out,
 	}
 }
+type LinkedQuotationSummaryResponse struct {
+	QuotationID int    `json:"quotation_id"`
+	QuotationNo string `json:"quotation_no"`
+	LinkedBy    string `json:"quotation_link_ref_admin,omitempty"`
+	LinkDate    string `json:"quotation_link_date,omitempty"`
+	TotalPR     int    `json:"total_pr"`
+}
+
+func NewLinkedQuotationSummaryResponse(q models.PRQuotation, totalPR int) LinkedQuotationSummaryResponse {
+	linkedBy := ""
+	if q.LinkRefAdmin != nil {
+		linkedBy = *q.LinkRefAdmin
+	}
+	linkDate := ""
+	if q.LinkDate != nil {
+		linkDate = q.LinkDate.Format(time.RFC3339)
+	}
+	return LinkedQuotationSummaryResponse{
+		QuotationID: q.ID, QuotationNo: q.No, LinkedBy: linkedBy, LinkDate: linkDate, TotalPR: totalPR,
+	}
+}
+
+type QuotationPRResponse struct {
+	PRID            int     `json:"pr_id"`
+	RfpNo           string  `json:"pr_rfp_no"`
+	DescriptionItem string  `json:"pr_description_item"`
+	RequesterName   string  `json:"requester_name,omitempty"`
+	ResponsibleName string  `json:"responsible_name,omitempty"`
+	Status          string  `json:"pr_status"`
+	RequestedAmount float64 `json:"pr_requested_amount"`
+	CreateDate      string  `json:"pr_create_date"`
+}
+
+func NewQuotationPRResponseList(list []repository.QuotationPRRow) []QuotationPRResponse {
+	out := make([]QuotationPRResponse, 0, len(list))
+	for _, v := range list {
+		out = append(out, QuotationPRResponse{
+			PRID: v.PRID, RfpNo: v.RfpNo, DescriptionItem: v.DescriptionItem,
+			RequesterName: v.RequesterName, ResponsibleName: v.ResponsibleName,
+			Status: v.Status, RequestedAmount: v.RequestedAmount,
+			CreateDate: v.CreateDate.Format(time.RFC3339),
+		})
+	}
+	return out
+}

@@ -1754,6 +1754,67 @@ paths:
             PO belum berstatus prepared, quotation sudah ter-link ke PO
             (lain), atau belum ada PR anggota yang `completed`
 
+  /api/po/{id}/linked-quotations:
+    parameters:
+      - $ref: "#/components/parameters/PoIdPath"
+    get:
+      tags: [PO Quotation Link]
+      summary: Daftar grup quotation yang sudah ter-link ke PO
+      description: >
+        Dipakai pada halaman detail/edit PO. Tidak butuh access_slug
+        khusus (sama seperti GET /api/po/{id}), cukup login. Setiap item
+        berisi ringkasan grup beserta jumlah PR anggota (`total_pr`).
+        Daftar PR di dalam grup diambil terpisah lewat endpoint
+        `/api/po/{id}/linked-quotations/{quotationId}/prs` saat grup di-click.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/LinkedQuotationSummaryResponse" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/po/{id}/linked-quotations/{quotationId}/prs:
+    parameters:
+      - $ref: "#/components/parameters/PoIdPath"
+      - name: quotationId
+        in: path
+        required: true
+        schema: { type: integer }
+    get:
+      tags: [PO Quotation Link]
+      summary: Daftar PR anggota sebuah grup quotation yang ter-link ke PO
+      description: >
+        Dipanggil saat grup quotation di-click pada halaman detail/edit PO.
+        Tidak butuh access_slug khusus, cukup login. Quotation harus
+        benar-benar ter-link ke PO pada path, jika tidak dikembalikan 404
+        (mencegah akses lintas PO lewat tebak ID). Terurut dari PR terlama.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponseBase"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/QuotationPRResponse" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          description: Quotation tidak ditemukan, atau tidak ter-link ke PO ini
+
   /api/po/{id}/unlink-quotation:
     parameters:
       - $ref: "#/components/parameters/PoIdPath"
@@ -4577,6 +4638,27 @@ components:
         po_no_display:
           type: string
           description: Nomor PO yang akan ditampilkan ("PO BELUM RELEASE" bila belum ada)
+
+    LinkedQuotationSummaryResponse:
+      type: object
+      properties:
+        quotation_id: { type: integer }
+        quotation_no: { type: string }
+        quotation_link_ref_admin: { type: string }
+        quotation_link_date: { type: string, format: date-time }
+        total_pr: { type: integer }
+
+    QuotationPRResponse:
+      type: object
+      properties:
+        pr_id: { type: integer }
+        pr_rfp_no: { type: string }
+        pr_description_item: { type: string }
+        requester_name: { type: string }
+        responsible_name: { type: string }
+        pr_status: { type: string }
+        pr_requested_amount: { type: number }
+        pr_create_date: { type: string, format: date-time }
 
     # --- purchase request: response payloads ---
     PRResponse:

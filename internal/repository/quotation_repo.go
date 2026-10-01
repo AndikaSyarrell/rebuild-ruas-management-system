@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"strings"
+	"time"
 
 	"rms-backend/internal/db"
 	"rms-backend/internal/models"
@@ -321,4 +322,42 @@ func (r *PRQuotationRepo) ResponsiblesByPO(ctx context.Context, poID string, exc
 		WHERE q.quotation_ref_po = ? AND pr.pr_id <> ?
 		  AND pr.pr_status NOT IN ('cancelled', 'rejected')
 		ORDER BY rp.responsible_id`, poID, excludePRID)
+}
+// QuotationPRRow: baris PR anggota sebuah group quotation (untuk tampilan detail group).
+type QuotationPRRow struct {
+	PRID            int
+	RfpNo           string
+	DescriptionItem string
+	RequesterName   string
+	ResponsibleName string
+	Status          string
+	RequestedAmount float64
+	CreateDate      time.Time
+}
+
+func (r *PRQuotationRepo) ListPRsByQuotation(ctx context.Context, quotationID int) ([]QuotationPRRow, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT pr.pr_id, pr.pr_rfp_no, pr.pr_description_item,
+		       COALESCE(ad.admin_name, ''), COALESCE(rp.responsible_name, ''),
+		       pr.pr_status, pr.pr_requested_amount, pr.pr_create_date
+		FROM T_Purchase_Request pr
+		LEFT JOIN T_Admin ad ON pr.pr_ref_admin = ad.admin_id
+		LEFT JOIN T_Responsible rp ON pr.pr_ref_responsible = rp.responsible_id
+		WHERE pr.pr_ref_quotation = ?
+		ORDER BY pr.pr_create_date ASC`, quotationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []QuotationPRRow
+	for rows.Next() {
+		var v QuotationPRRow
+		if err := rows.Scan(&v.PRID, &v.RfpNo, &v.DescriptionItem, &v.RequesterName,
+			&v.ResponsibleName, &v.Status, &v.RequestedAmount, &v.CreateDate); err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
 }

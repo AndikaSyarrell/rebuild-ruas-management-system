@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -667,4 +668,63 @@ func (h *POHandler) DeleteItem(w http.ResponseWriter, r *http.Request) {
 
 	h.logActivity(r, poID, "delete", "Menghapus item pada daftar")
 	utils.OK(w, "Item berhasil dihapus", nil)
+}
+
+func (h *POHandler) LinkedQuotations(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if _, err := h.repo.GetDetail(r.Context(), id); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			utils.Error(w, http.StatusNotFound, "PO tidak ditemukan")
+			return
+		}
+		utils.Error(w, http.StatusInternalServerError, "Gagal mengambil data PO")
+		return
+	}
+
+	quotations, err := h.quotationRepo.ListByPO(r.Context(), id)
+	if err != nil {
+		utils.Error(w, http.StatusInternalServerError, "Gagal mengambil daftar quotation ter-link")
+		return
+	}
+	out := make([]dto.LinkedQuotationSummaryResponse, 0, len(quotations))
+	for _, q := range quotations {
+		members, err := h.quotationRepo.MemberPRs(r.Context(), q.ID)
+		if err != nil {
+			utils.Error(w, http.StatusInternalServerError, "Gagal mengambil anggota quotation")
+			return
+		}
+		out = append(out, dto.NewLinkedQuotationSummaryResponse(q, len(members)))
+	}
+	utils.OK(w, "Fetch success", out)
+}
+
+// GET /api/po/{id}/linked-quotations/{quotationId}/prs
+func (h *POHandler) LinkedQuotationPRs(w http.ResponseWriter, r *http.Request) {
+	poID := chi.URLParam(r, "id")
+	quotationID, ok := utils.ParseIDParam(w, chi.URLParam(r, "quotationId"))
+	if !ok {
+		return
+	}
+
+	q, err := h.quotationRepo.GetByID(r.Context(), quotationID)
+	if errors.Is(err, sql.ErrNoRows) {
+		utils.Error(w, http.StatusNotFound, "Quotation tidak ditemukan")
+		return
+	}
+	if err != nil {
+		utils.Error(w, http.StatusInternalServerError, "Gagal mengambil data quotation")
+		return
+	}
+	// Pastikan group ini memang ter-link ke PO di path (mencegah akses lintas PO lewat tebak ID).
+	if q.RefPO == nil || *q.RefPO != poID {
+		utils.Error(w, http.StatusNotFound, "Quotation ini tidak ter-link ke PO yang dimaksud")
+		return
+	}
+
+	prs, err := h.quotationRepo.ListPRsByQuotation(r.Context(), quotationID)
+	if err != nil {
+		utils.Error(w, http.StatusInternalServerError, "Gagal mengambil daftar purchase request")
+		return
+	}
+	utils.OK(w, "Fetch success", dto.NewQuotationPRResponseList(prs))
 }

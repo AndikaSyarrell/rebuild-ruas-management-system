@@ -247,6 +247,8 @@ func New(d *Dependencies) http.Handler {
 			rt.Get("/total", d.POHandler.Total)
 			rt.With(requireAccess("export_po")).Get("/export", d.POHandler.Export)
 			rt.Get("/{id}", d.POHandler.Detail)
+			rt.Get("/{id}/linked-quotations", d.POHandler.LinkedQuotations)
+			rt.Get("/{id}/linked-quotations/{quotationId}/prs", d.POHandler.LinkedQuotationPRs)
 			rt.With(requireAccess("create_po")).Post("/", d.POHandler.Create)
 			rt.With(requireAccess("edit_po")).Put("/{id}", d.POHandler.Update)
 			rt.With(requireAccess("delete_po")).Delete("/{id}", d.POHandler.Delete)
