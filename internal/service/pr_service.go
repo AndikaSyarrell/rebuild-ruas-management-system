@@ -111,16 +111,21 @@ func (s *PRService) generateRfpNo(ctx context.Context, adminID string) (string, 
 		return "", err
 	}
 
-	// Counter dibuat per divisi dan tahun agar nomor tidak bergantung pada user
-	// serta kembali ke awal ketika memasuki tahun baru.
-	year := time.Now().Format("2006")
+	now := time.Now()
+
+	year := now.Format("2006")
 	counterKey := fmt.Sprintf("%v-%s", *admin.RefDivision, year)
 	seq, err := s.counterRepo.NextSequence(ctx, counterKey)
 	if err != nil {
 		return "", err
 	}
 
-	return fmt.Sprintf("%s-%03d%s", division.Code, seq, year), nil
+	return fmt.Sprintf(
+		"%s-%05d%s",
+		division.Code,
+		seq,
+		now.Format("02122006"),
+	), nil
 }
 
 func (s *PRService) CreatePR(ctx context.Context, adminID string, in repository.PRInput, confirmJoinQuotation bool) (int64, *QuotationConflict, error) {
