@@ -10,7 +10,7 @@ import (
 )
 
 var (
-	ErrPONotPrepared              = errors.New("po harus berstatus prepared sebelum dapat di-link ke quotation")
+	// ErrPONotPrepared              = errors.New("po harus berstatus prepared sebelum dapat di-link ke quotation")
 	ErrPONotLinkable              = errors.New("po harus berstatus prepared, progress, atau complete sebelum dapat di-link ke quotation")
 	ErrQuotationAlreadyLinked     = errors.New("quotation ini sudah ter-link ke po lain")
 	ErrQuotationNotEligible       = errors.New("belum ada purchase request anggota grup quotation ini yang berstatus completed")
@@ -67,10 +67,6 @@ func (s *POService) LinkQuotation(ctx context.Context, poID string, quotationID 
 		}
 		return err
 	}
-	if po.Status != "prepared" {
-		return ErrPONotPrepared
-	}
-
 	if !IsLinkablePOStatus(po.Status) {
 		return ErrPONotLinkable
 	}

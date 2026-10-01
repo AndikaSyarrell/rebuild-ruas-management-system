@@ -374,10 +374,6 @@ func (h *POHandler) ChangeStatus(w http.ResponseWriter, r *http.Request) {
 		utils.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := h.repo.ChangeStatus(r.Context(), id, req.Status); err != nil {
-		utils.Error(w, http.StatusInternalServerError, "Gagal mengubah status PO")
-		return
-	}
 	if req.Status == "cancel" || req.Status == "open" {
 		linked, err := h.quotationRepo.ListByPO(r.Context(), id)
 		if err != nil {

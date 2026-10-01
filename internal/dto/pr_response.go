@@ -30,15 +30,15 @@ type PRResponse struct {
 	PriorityDate      string  `json:"pr_priority_date,omitempty"`
 	CreateDate        string  `json:"pr_create_date"`
 	ModifyDate        string  `json:"pr_modify_date"`
-	PoNoDisplay 	  string `json:"pr_po_no_display"`
+	PoNoDisplay 	  string  `json:"pr_po_no_display"`
 
-	RefPreviousPR *int   `json:"pr_ref_previous_pr,omitempty"` 
-	PreviousRfpNo string `json:"previous_rfp_no,omitempty"`    
-	RefQuotation *int   `json:"pr_ref_quotation,omitempty"`
-	QuotationNo  string `json:"quotation_no,omitempty"`
-	PoNo         string `json:"pr_po_no,omitempty"`          
-	Margin           float64 `json:"pr_margin"`
-	MarginPercentage float64 `json:"pr_margin_percentage"`
+	RefPreviousPR 	  *int    `json:"pr_ref_previous_pr,omitempty"` 
+	PreviousRfpNo     string  `json:"previous_rfp_no,omitempty"`    
+	RefQuotation 	  *int    `json:"pr_ref_quotation,omitempty"`
+	QuotationNo  	  string  `json:"quotation_no,omitempty"`
+	PoNo         	  string  `json:"pr_po_no,omitempty"`          
+	Margin            float64 `json:"pr_margin"`
+	MarginPercentage  float64 `json:"pr_margin_percentage"`
 }
 
 func NewPRResponse(m models.PurchaseRequest) PRResponse {
