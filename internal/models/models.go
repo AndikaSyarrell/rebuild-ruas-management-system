@@ -263,11 +263,13 @@ type PurchaseRequest struct {
 	SignatureRef  *int   `json:"pr_signature_ref" db:"pr_signature_ref"`
 	SignatureFile string `json:"signature_file,omitempty" db:"signature_file"` // hasil JOIN, opsional
 
-	RefPreviousPR *int   `json:"pr_ref_previous_pr" db:"pr_ref_previous_pr"`       // BARU
-	PreviousRfpNo string `json:"previous_rfp_no,omitempty" db:"previous_rfp_no"`  // BARU, hasil JOIN
+	RefPreviousPR         *int    `json:"pr_ref_previous_pr" db:"pr_ref_previous_pr"`
+	PreviousRfpNo         string  `json:"previous_rfp_no,omitempty" db:"previous_rfp_no"`
+	PreviousRequestedAmount float64 `json:"previous_requested_amount,omitempty" db:"previous_requested_amount"` // hasil JOIN
 
 	RefQuotation  *int   `json:"pr_ref_quotation" db:"pr_ref_quotation"`           // BARU - PR-PO Linking
 	QuotationNo   string `json:"quotation_no,omitempty" db:"quotation_no"`         // BARU, hasil JOIN (nomor ter-normalisasi)
+	
 
 	Margin           float64 `json:"pr_margin,omitempty" db:"-"`
 	MarginPercentage float64 `json:"pr_margin_percentage,omitempty" db:"-"`

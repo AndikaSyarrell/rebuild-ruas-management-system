@@ -10,35 +10,36 @@ import (
 )
 
 type PRResponse struct {
-	ID                int     `json:"pr_id"`
-	RefAdmin          string  `json:"pr_ref_admin"`
-	AdminName         string  `json:"admin_name,omitempty"`
-	RefResponsible    int     `json:"pr_ref_responsible"`
-	ResponsibleName   string  `json:"responsible_name,omitempty"`
-	RfpNo             string  `json:"pr_rfp_no"`
-	RfpDate           string  `json:"pr_rfp_date"`
-	DescriptionItem   string  `json:"pr_description_item"`
-	SubClient         string  `json:"pr_subclient,omitempty"`
-	RequestedAmount   float64 `json:"pr_requested_amount"`
-	QoutNo            string  `json:"pr_qout_no,omitempty"`
-	PoAmount          float64 `json:"pr_po_amount"`
-	Hpp               float64 `json:"pr_hpp"`
-	TargetInvoiceDate string  `json:"pr_target_invoice_date,omitempty"`
-	Status            string  `json:"pr_status"`
-	Priority          string  `json:"pr_priority,omitempty"`
-	PriorityRefAdmin  string  `json:"pr_priority_ref_admin,omitempty"`
-	PriorityDate      string  `json:"pr_priority_date,omitempty"`
-	CreateDate        string  `json:"pr_create_date"`
-	ModifyDate        string  `json:"pr_modify_date"`
-	PoNoDisplay 	  string  `json:"pr_po_no_display"`
+	ID                		int     	`json:"pr_id"`
+	RefAdmin          		string  	`json:"pr_ref_admin"`
+	AdminName         		string  	`json:"admin_name,omitempty"`
+	RefResponsible    		int     	`json:"pr_ref_responsible"`
+	ResponsibleName   		string  	`json:"responsible_name,omitempty"`
+	RfpNo             		string  	`json:"pr_rfp_no"`
+	RfpDate           		string  	`json:"pr_rfp_date"`
+	DescriptionItem   		string  	`json:"pr_description_item"`
+	SubClient         		string  	`json:"pr_subclient,omitempty"`
+	RequestedAmount   		float64 	`json:"pr_requested_amount"`
+	QoutNo            		string  	`json:"pr_qout_no,omitempty"`
+	PoAmount          		float64 	`json:"pr_po_amount"`
+	Hpp               		float64 	`json:"pr_hpp"`
+	TargetInvoiceDate 		string  	`json:"pr_target_invoice_date,omitempty"`
+	Status            		string  	`json:"pr_status"`
+	Priority          		string  	`json:"pr_priority,omitempty"`
+	PriorityRefAdmin  		string  	`json:"pr_priority_ref_admin,omitempty"`
+	PriorityDate      		string  	`json:"pr_priority_date,omitempty"`
+	CreateDate        		string  	`json:"pr_create_date"`
+	ModifyDate        		string  	`json:"pr_modify_date"`
+	PoNoDisplay 	  		string  	`json:"pr_po_no_display"`
 
-	RefPreviousPR 	  *int    `json:"pr_ref_previous_pr,omitempty"` 
-	PreviousRfpNo     string  `json:"previous_rfp_no,omitempty"`    
-	RefQuotation 	  *int    `json:"pr_ref_quotation,omitempty"`
-	QuotationNo  	  string  `json:"quotation_no,omitempty"`
-	PoNo         	  string  `json:"pr_po_no,omitempty"`          
-	Margin            float64 `json:"pr_margin"`
-	MarginPercentage  float64 `json:"pr_margin_percentage"`
+	RefPreviousPR           *int     	`json:"pr_ref_previous_pr,omitempty"`
+	PreviousRfpNo           string   	`json:"previous_rfp_no,omitempty"`
+	PreviousRequestedAmount *float64 	`json:"previous_requested_amount,omitempty"`   
+	RefQuotation 	  		*int    	`json:"pr_ref_quotation,omitempty"`
+	QuotationNo  	  		string  	`json:"quotation_no,omitempty"`
+	PoNo         	  		string  	`json:"pr_po_no,omitempty"`          
+	Margin            		float64 	`json:"pr_margin"`
+	MarginPercentage  		float64 	`json:"pr_margin_percentage"`
 }
 
 func NewPRResponse(m models.PurchaseRequest) PRResponse {
@@ -76,33 +77,39 @@ func NewPRResponse(m models.PurchaseRequest) PRResponse {
 		marginPct = (margin / m.PoAmount) * 100
 	}
 
+	var prevAmount *float64
+	if m.RefPreviousPR != nil {
+		prevAmount = &m.PreviousRequestedAmount
+	}
+
 	return PRResponse{
-		ID:                m.ID,
-		RefAdmin:          m.RefAdmin,
-		AdminName:         m.AdminName,
-		RefResponsible:    m.RefResponsible,
-		ResponsibleName:   m.ResponsibleName,
-		RfpNo:             m.RfpNo,
-		DescriptionItem:   m.DescriptionItem,
-		SubClient:         subClient,
-		RequestedAmount:   m.RequestedAmount,
-		QoutNo:            qoutNo,
-		PoAmount:          m.PoAmount,
-		Hpp:               m.Hpp,
-		TargetInvoiceDate: formatDate(m.TargetInvoiceDate),
-		RefPreviousPR: 	   m.RefPreviousPR,
-		PreviousRfpNo:	   m.PreviousRfpNo,
-		RefQuotation:      m.RefQuotation,
-		QuotationNo:       m.QuotationNo,
-		PoNo:              poNo,
-		Status:            m.Status,
-		Priority:          priority,
-		PriorityRefAdmin:  priorityRefAdmin,
-		PriorityDate:      formatDateTime(m.PriorityDate),
-		CreateDate:        m.CreateDate.Format(time.RFC3339),
-		ModifyDate:        m.ModifyDate.Format(time.RFC3339),
-		Margin:            margin,
-		MarginPercentage:  marginPct,
+		ID:                		 m.ID,
+		RefAdmin:          		 m.RefAdmin,
+		AdminName:         		 m.AdminName,
+		RefResponsible:    		 m.RefResponsible,
+		ResponsibleName:   		 m.ResponsibleName,
+		RfpNo:             		 m.RfpNo,
+		DescriptionItem:   		 m.DescriptionItem,
+		SubClient:         		 subClient,
+		RequestedAmount:   		 m.RequestedAmount,
+		QoutNo:            		 qoutNo,
+		PoAmount:          		 m.PoAmount,
+		Hpp:               		 m.Hpp,
+		TargetInvoiceDate: 		 formatDate(m.TargetInvoiceDate),
+		RefPreviousPR: 	   		 m.RefPreviousPR,
+		PreviousRfpNo:           m.PreviousRfpNo,
+		PreviousRequestedAmount: prevAmount,
+		RefQuotation:      		 m.RefQuotation,
+		QuotationNo:       		 m.QuotationNo,
+		PoNo:              		 poNo,
+		Status:            		 m.Status,
+		Priority:          		 priority,
+		PriorityRefAdmin:  		 priorityRefAdmin,
+		PriorityDate:      		 formatDateTime(m.PriorityDate),
+		CreateDate:        		 m.CreateDate.Format(time.RFC3339),
+		ModifyDate:        		 m.ModifyDate.Format(time.RFC3339),
+		Margin:            		 margin,
+		MarginPercentage:  		 marginPct,
 	}
 }
 

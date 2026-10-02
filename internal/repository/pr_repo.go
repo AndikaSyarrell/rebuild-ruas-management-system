@@ -22,7 +22,7 @@ const prDetailSelect = `
 	       pr.pr_ref_previous_pr, pr.pr_po_no, pr.pr_ref_quotation,
 	       pr.pr_create_date, pr.pr_modify_date,
 	       COALESCE(ad.admin_name, ''), COALESCE(rp.responsible_name, ''), COALESCE(sg.signature_file, ''),
-	       COALESCE(prev.pr_rfp_no, ''), COALESCE(q.quotation_no, '')
+	       COALESCE(prev.pr_rfp_no, ''), COALESCE(q.quotation_no, ''), COALESCE(prev.pr_requested_amount, 0)
 	FROM T_Purchase_Request pr
 	LEFT JOIN T_Admin ad ON pr.pr_ref_admin = ad.admin_id
 	LEFT JOIN T_Responsible rp ON pr.pr_ref_responsible = rp.responsible_id
@@ -39,7 +39,7 @@ func scanPR(row interface{ Scan(dest ...interface{}) error }) (*models.PurchaseR
 		&v.PriorityRefAdmin, &v.PriorityDate, &v.SignatureRef,
 		&v.RefPreviousPR, &v.PoNo, &v.RefQuotation,
 		&v.CreateDate, &v.ModifyDate,
-		&v.AdminName, &v.ResponsibleName, &v.SignatureFile, &v.PreviousRfpNo, &v.QuotationNo)
+		&v.AdminName, &v.ResponsibleName, &v.SignatureFile, &v.PreviousRfpNo, &v.QuotationNo, &v.PreviousRequestedAmount)
 	if err != nil {
 		return nil, err
 	}
