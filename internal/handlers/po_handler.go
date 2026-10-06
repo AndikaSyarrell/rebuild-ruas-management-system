@@ -312,17 +312,17 @@ func (h *POHandler) Update(w http.ResponseWriter, r *http.Request) {
 		utils.Error(w, http.StatusNotFound, "PO tidak ditemukan")
 		return
 	}
-	if current.OrderNum != req.OrderNum {
-		exists, err := h.repo.OrderNumExists(r.Context(), req.OrderNum)
-		if err != nil {
-			utils.Error(w, http.StatusInternalServerError, "Gagal memeriksa nomor PO")
-			return
-		}
-		if exists {
-			utils.Error(w, http.StatusConflict, "Nomor PO sudah terdaftar")
-			return
-		}
-	}
+	// if current.OrderNum != req.OrderNum {
+	// 	exists, err := h.repo.OrderNumExists(r.Context(), req.OrderNum)
+	// 	if err != nil {
+	// 		utils.Error(w, http.StatusInternalServerError, "Gagal memeriksa nomor PO")
+	// 		return
+	// 	}
+	// 	if exists {
+	// 		utils.Error(w, http.StatusConflict, "Nomor PO sudah terdaftar")
+	// 		return
+	// 	}
+	// }
 
 	clientID := int(req.ClientID)
 	clientName, clientEmail := req.ClientName, req.ClientEmail
@@ -357,6 +357,16 @@ func (h *POHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		utils.Error(w, http.StatusInternalServerError, "Gagal memperbarui PO")
 		return
+	}
+
+	// Nomor PO berubah -> PR pada grup quotation yang ter-link ikut diperbarui.
+	if current.OrderNum != req.OrderNum {
+		if err := h.poService.SyncOrderNumToLinkedPRs(r.Context(), id, req.OrderNum); err != nil {
+			h.logActivity(r, id, "edit", "Mengubah detail PO, namun gagal menyinkronkan nomor PO ke PR ter-link")
+			utils.Error(w, http.StatusInternalServerError, "PO diperbarui, namun gagal menyinkronkan nomor PO ke purchase request yang ter-link")
+			return
+		}
+		h.logActivity(r, id, "edit", "Nomor PO diubah dari "+current.OrderNum+" menjadi "+req.OrderNum+", PR ter-link ikut diperbarui")
 	}
 
 	h.logActivity(r, id, "edit", "Mengubah detail informasi purchase order")

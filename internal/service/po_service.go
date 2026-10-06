@@ -137,3 +137,8 @@ func (s *POService) Delete(ctx context.Context, poID, adminID string) error {
 
 	return s.poRepo.DeleteWithQuotationCascade(ctx, poID, adminID, note)
 }
+
+func (s *POService) SyncOrderNumToLinkedPRs(ctx context.Context, poID, newOrderNum string) error {
+	_, err := s.quotationRepo.SyncPoNoByPO(ctx, poID, newOrderNum)
+	return err
+}

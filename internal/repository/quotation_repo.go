@@ -361,3 +361,16 @@ func (r *PRQuotationRepo) ListPRsByQuotation(ctx context.Context, quotationID in
 	}
 	return out, rows.Err()
 }
+
+func (r *PRQuotationRepo) SyncPoNoByPO(ctx context.Context, poID, orderNum string) (int64, error) {
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE T_Purchase_Request
+		SET pr_po_no = ?
+		WHERE pr_ref_quotation IN (
+			SELECT quotation_id FROM T_Pr_Quotation WHERE quotation_ref_po = ?
+		)`, orderNum, poID)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
