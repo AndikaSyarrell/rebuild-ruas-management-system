@@ -311,6 +311,8 @@ func New(d *Dependencies) http.Handler {
 			rt.Get("/my-approvals", d.PRHandler.MyTurn)
 			rt.Get("/my-decisions", d.PRHandler.MyDecisions)
 			rt.With(requireAccess("create_pr")).Get("/quotations", d.PRHandler.SearchQuotations)
+			rt.With(requireAccess("create_pr")).Get("/link-check", d.PRHandler.CheckLink)
+			rt.With(requireAccess("create_pr")).Get("/po-options", d.PRHandler.SearchPOOptions)
 			rt.With(requireAny("checker", "director", "finance")).Post("/approvals/{approvalId}/approve", d.PRHandler.ApproveApproval)
 			rt.With(requireAny("checker", "director", "finance")).Post("/approvals/bulk-decide", d.PRHandler.BulkDecide)
 			rt.With(requireAny("checker", "director", "finance")).Post("/approvals/{approvalId}/reject", d.PRHandler.RejectApproval)
@@ -319,7 +321,7 @@ func New(d *Dependencies) http.Handler {
 			rt.Get("/{id}/comments", d.PRHandler.ListComments)
 			rt.Post("/{id}/comments", d.PRHandler.AddComment)
 			
-			rt.With(requireAccess("request_revision_pr")).Post("/approvals/{approvalId}/request-revision", d.PRHandler.RequestRevision)
+			// rt.With(requireAccess("request_revision_pr")).Post("/approvals/{approvalId}/request-revision", d.PRHandler.RequestRevision)
 			rt.With(requireAccess("update_pr_amounts")).Post("/{id}/amounts", d.PRHandler.UpdateAmounts)
 			
 			rt.Get("/{id}/payments", d.PRPaymentHandler.ListByPR)

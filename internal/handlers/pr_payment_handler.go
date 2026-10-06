@@ -224,7 +224,7 @@ func (h *PRPaymentHandler) Export(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *PRPaymentHandler) SetPriorityDate(w http.ResponseWriter, r *http.Request) {
-	paymentID, ok := utils.ParseIDParam(w, chi.URLParam(r, "paymendId"))
+	paymentID, ok := utils.ParseIDParam(w, chi.URLParam(r, "paymentId"))
 	if !ok {
 		return
 	}
@@ -236,18 +236,20 @@ func (h *PRPaymentHandler) SetPriorityDate(w http.ResponseWriter, r *http.Reques
 	date := ""
 	if v := strings.TrimSpace(req.PriorityDate); v != ""{
 		date = utils.ParseDateParam(v)
-		if date == ""{
-			utils.Error(w, http.StatusBadRequest, "Tanggal pembayaran tidak valid")
-		}
-		return
+		if date == "" {
+			utils.Error(w, http.StatusBadRequest, "Tanggal prioritas tidak valid")
+			return
+		}        
 	}
+
 	payment, err := h.repo.GetByID(r.Context(), paymentID) 
 	if errors.Is(err, sql.ErrNoRows){
 		utils.Error(w, http.StatusNotFound, "data pembayaran tidak ditemukan")
 		return
 	}
-	if err != nil{
+	if err != nil {
 		utils.Error(w, http.StatusInternalServerError, "gagal mengambil data pembayaran")
+		return
 	}
 	if !requirePRVisible(w, r, h.prRepo, payment.RefPR){
 		return

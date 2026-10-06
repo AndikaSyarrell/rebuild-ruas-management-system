@@ -273,17 +273,25 @@ func (h *PRHandler) Update(w http.ResponseWriter, r *http.Request) {
 		QoutNo:            req.QoutNo,
 		TargetInvoiceDate: targetInvoiceDate,
 		RefPreviousPR:     req.RefPreviousPRPtr(),
-		PoNo: req.PoNo,
+		PoNo: 			   req.PoNo,
+		PoAmount: 		   float64(req.PoAmount),
+		Hpp:      		   float64(req.Hpp),
 	}
 	conflict, err := h.prService.UpdatePR(r.Context(), id, in, req.ConfirmJoinQuotation)
 	if err != nil {
 		switch {
+		case errors.Is(err, service.ErrResponsibleMismatchWithQuotation):
+			utils.Error(w, http.StatusConflict, "Responsible (CoA) harus sama dengan responsible pada grup quotation ini")
+		case errors.Is(err, service.ErrPONotFound):
+			utils.Error(w, http.StatusBadRequest, "Nomor PO tidak ditemukan di RMS")
+		case errors.Is(err, service.ErrPONotLinkable):
+			utils.Error(w, http.StatusConflict, "Nomor PO hanya dapat dipakai bila PO berstatus prepared, progress, atau complete")
+		case errors.Is(err, service.ErrPONoMismatchWithQuotation):
+			utils.Error(w, http.StatusConflict, "Nomor PO berbeda dengan PO yang ter-link ke grup quotation ini")
 		case errors.Is(err, service.ErrNotFound):
 			utils.Error(w, http.StatusNotFound, "Purchase request tidak ditemukan")
 		case errors.Is(err, service.ErrQuotationConfirmationRequired):
-			utils.JSON(w, http.StatusConflict, false,
-				"Nomor quotation ini sudah dipakai oleh grup purchase request lain. Konfirmasi untuk bergabung ke grup tersebut.",
-				dto.NewQuotationConflictResponse(conflict))
+			utils.JSON(w, http.StatusConflict, false, "Nomor quotation ini sudah dipakai oleh grup purchase request lain. Konfirmasi untuk bergabung ke grup tersebut.", dto.NewQuotationConflictResponse(conflict))
 		case errors.Is(err, service.ErrQuotationLocked):
 			utils.Error(w, http.StatusConflict, "Nomor quotation tidak dapat diubah karena purchase request ini sudah tergabung dalam grup quotation")
 		case errors.Is(err, service.ErrQuotationMismatchWithPrevious):
@@ -643,11 +651,11 @@ func (h *PRHandler) UpdateAmounts(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *PRHandler) ExportRFP(w http.ResponseWriter, r *http.Request) {
-	id, ok := utils.ParseIDParam(w, chi.URLParam(r, "id"))
-	if !requirePRVisible(w, r, h.repo, id) {
+		id, ok := utils.ParseIDParam(w, chi.URLParam(r, "id"))
+	if !ok {
 		return
 	}
-	if !ok {
+	if !requirePRVisible(w, r, h.repo, id) {
 		return
 	}
 	data, filename, err := h.exportService.GenerateRFPDocx(r.Context(), id)

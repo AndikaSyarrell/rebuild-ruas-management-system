@@ -184,8 +184,30 @@ func (h *PRCancelHandler) ListByPR(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !requirePRVisible(w, r, h.prRepo, prID) {
+		adminID, ok := actorFromContext(r.Context())
+	if !ok {
+		utils.Error(w, http.StatusUnauthorized, "Tidak terautentikasi")
 		return
+	}
+	pr, err := h.prRepo.GetByID(r.Context(), prID)
+	if errors.Is(err, sql.ErrNoRows) {
+		utils.Error(w, http.StatusNotFound, "Purchase request tidak ditemukan")
+		return
+	}
+	if err != nil {
+		utils.Error(w, http.StatusInternalServerError, "Gagal mengambil data purchase request")
+		return
+	}
+	if pr.RefAdmin != adminID {
+		isFinance, err := h.accessRepo.HasAccess(r.Context(), adminID, "finance")
+		if err != nil {
+			utils.Error(w, http.StatusInternalServerError, "Gagal memeriksa hak akses")
+			return
+		}
+		if !isFinance {
+			utils.Error(w, http.StatusForbidden, "Anda tidak memiliki akses ke request pembatalan ini")
+			return
+		}
 	}
 	data, err := h.repo.ListByPR(r.Context(), prID)
 	if err != nil {

@@ -86,7 +86,9 @@ type UpdatePRRequest struct {
 	RefPreviousPR        *utils.FlexInt           `json:"ref_previous_pr"`
 	Payments             []PRPaymentDraftRequest  `json:"payments,omitempty"`
 	ConfirmJoinQuotation bool                     `json:"confirm_join_quotation"` // BARU
-	PoNo 				*string `json:"po_no"`
+	PoNo 				*string 				  `json:"po_no"`
+	PoAmount 			utils.FlexFloat 		  `json:"po_amount"`
+	Hpp      			utils.FlexFloat 		  `json:"hpp"`
 }
 
 func (r UpdatePRRequest) RefPreviousPRPtr() *int {
@@ -122,6 +124,9 @@ func (r UpdatePRRequest) Validate() error {
 	}
 	if r.PoNo != nil && len(*r.PoNo) > 196 {
 		return errors.New("nomor po maksimal 196 karakter")
+	}
+	if float64(r.PoAmount) < 0 || float64(r.Hpp) < 0 {
+		return errors.New("po_amount dan hpp tidak boleh negatif")
 	}
 	for i, p := range r.Payments{
 		if err := p.Validate(); err != nil {
