@@ -162,13 +162,17 @@ func (h *PRDocumentHandler) Upload(w http.ResponseWriter, r *http.Request) {
 
 // DELETE /api/pr/{id}/documents/{docId}
 func (h *PRDocumentHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	prID, ok := utils.ParseIDParam(w, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
 	docID, ok := utils.ParseIDParam(w, chi.URLParam(r, "docId"))
 	if !ok {
 		return
 	}
 
 	doc, err := h.repo.GetByID(r.Context(), docID)
-	if err != nil {
+	if err != nil || doc.RefPR != prID {
 		utils.Error(w, http.StatusNotFound, "Dokumen tidak ditemukan")
 		return
 	}
@@ -181,6 +185,18 @@ func (h *PRDocumentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	if doc.RefAdmin != adminID {
 		utils.Error(w, http.StatusForbidden, "Anda hanya dapat menghapus dokumen yang Anda unggah sendiri")
 		return
+	}
+
+	if doc.Type == "cost_control" {
+		pr, err := h.prRepo.GetByID(r.Context(), prID)
+		if err != nil {
+			utils.Error(w, http.StatusInternalServerError, "Gagal mengambil data purchase request")
+			return
+		}
+		if pr.Status != "draft" && pr.Status != "revision" {
+			utils.Error(w, http.StatusConflict, "Dokumen cost control tidak dapat dihapus setelah purchase request disubmit")
+			return
+		}
 	}
 
 	if err := h.repo.Delete(r.Context(), docID); err != nil {
