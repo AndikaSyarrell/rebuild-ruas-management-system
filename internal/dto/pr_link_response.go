@@ -68,7 +68,7 @@ type LinkCheckResponse struct {
 	Quotation   LinkCheckQuotationResponse `json:"quotation"`
 	PO          *LinkCheckPOResponse       `json:"po"`
 	Responsible *ResponsibleLockResponse   `json:"responsible"`
-	PoNoDisplay string 					   `json:"po_no_display"`
+	PoNoDisplay string                     `json:"po_no_display"`
 }
 
 func newLinkCheckPO(p *service.LinkCheckPO) *LinkCheckPOResponse {
@@ -96,6 +96,7 @@ func NewLinkCheckResponse(r *service.LinkCheckResult) LinkCheckResponse {
 			LinkedPO: newLinkCheckPO(r.QuotationLinkedPO), Members: members,
 		},
 		PO: newLinkCheckPO(r.PO),
+		PoNoDisplay: r.PoNoDisplay,
 	}
 	if r.Responsible != nil {
 		items := make([]ResponsibleRefResponse, 0, len(r.Responsible.Items))

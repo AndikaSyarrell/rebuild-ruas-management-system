@@ -326,7 +326,6 @@ func New(d *Dependencies) http.Handler {
 			
 			rt.Get("/{id}/payments", d.PRPaymentHandler.ListByPR)
 			rt.Get("/{id}/payment-chain", d.PRPaymentHandler.PaymentChain)
-			rt.With(requireAccess("create_pr_payment")).Post("/{id}/payments", d.PRPaymentHandler.Create)
 			rt.With(requireAccess("confirm_pr_payment")).Post("/payments/{paymentId}/confirm", d.PRPaymentHandler.Confirm)
 			rt.With(requireAccess("confirm_pr_payment")).Post("/payments/{paymentId}/cancel", d.PRPaymentHandler.Cancel)
 		})

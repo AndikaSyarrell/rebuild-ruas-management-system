@@ -87,7 +87,7 @@ func (s *PRPaymentService) CancelPayment(ctx context.Context, paymentID int, act
 	if _, err := s.commentRepo.Insert(ctx, payment.RefPR, actorAdminID, notes, "payment_cancellation"); err != nil {
 		return err
 	}
-	return nil
+	return s.prService.EvaluatePaymentCompletion(ctx, payment.RefPR, actorAdminID)
 }
 
 type StagePaymentHistory struct {

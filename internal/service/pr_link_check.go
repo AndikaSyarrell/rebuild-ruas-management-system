@@ -140,9 +140,6 @@ func (s *PRService) CheckQuotationPOLink(ctx context.Context, in LinkCheckInput)
 		res.Level, res.Code = LinkLevelError, "po_not_linkable"
 		res.Message = fmt.Sprintf("PO %s berstatus %s. Nomor PO hanya dapat dipakai bila PO berstatus prepared, progress, atau complete.", po.OrderNum, po.Status)
 	// ... case linked_other_po dan linked_match tidak berubah ...
-	case po != nil && norm != "":
-		res.Level, res.Code = LinkLevelWarning, "not_linked"
-		res.Message = fmt.Sprintf("Quotation %s belum ter-link ke PO %s. Nomor PO tetap disimpan pada PR ini; link grup quotation dilakukan dari halaman PO (status prepared, progress, atau complete) setelah ada PR completed di grup ini.", norm, po.OrderNum)
 	case po != nil && res.QuotationLinkedPO != nil && res.QuotationLinkedPO.ID != po.ID:
 		res.Level, res.Code = LinkLevelError, "linked_other_po"
 		res.Message = fmt.Sprintf("Quotation %s sudah ter-link ke PO %s, bukan PO %s.",

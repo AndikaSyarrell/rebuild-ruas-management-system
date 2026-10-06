@@ -638,6 +638,14 @@ func (h *PRHandler) UpdateAmounts(w http.ResponseWriter, r *http.Request) {
 			utils.Error(w, http.StatusConflict, "Purchase request ini sudah ter-link ke PO lewat quotation. Ubah nomor PO melalui proses linking PO, bukan lewat endpoint ini.")
 			return
 		}
+		if errors.Is(err, service.ErrPONotFound) {
+			utils.Error(w, http.StatusBadRequest, "Nomor PO tidak ditemukan di RMS")
+			return
+		}
+		if errors.Is(err, service.ErrPONotLinkable) {
+			utils.Error(w, http.StatusConflict, "Nomor PO hanya dapat dipakai bila PO berstatus prepared, progress, atau complete")
+			return
+		}
 		utils.Error(w, http.StatusInternalServerError, "Gagal memperbarui nominal purchase request")
 		return
 	}

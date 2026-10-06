@@ -322,14 +322,21 @@ func (s *PRService) resolveQuotation(ctx context.Context, qoutNo string, refPrev
 }
 
 func (s *PRService) UpdateAmounts(ctx context.Context, prID int, poAmount, hpp float64, poNo string) error {
-	if poNo != "" {
-		pr, err := s.prRepo.GetByID(ctx, prID)
-		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return ErrNotFound
-			}
-			return err
+	pr, err := s.prRepo.GetByID(ctx, prID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
 		}
+		return err
+	}
+
+	poNo = strings.TrimSpace(poNo)
+	current := ""
+	if pr.PoNo != nil {
+		current = strings.TrimSpace(*pr.PoNo)
+	}
+
+	if poNo != current {
 		if pr.RefQuotation != nil {
 			q, err := s.quotationRepo.GetByID(ctx, *pr.RefQuotation)
 			if err != nil {
@@ -338,6 +345,19 @@ func (s *PRService) UpdateAmounts(ctx context.Context, prID int, poAmount, hpp f
 			if q.RefPO != nil {
 				return ErrPRAlreadyLinkedToPO
 			}
+		}
+		if poNo != "" {
+			po, err := s.poRepo.GetByOrderNum(ctx, poNo)
+			if err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					return ErrPONotFound
+				}
+				return err
+			}
+			if !IsLinkablePOStatus(po.Status) {
+				return ErrPONotLinkable
+			}
+			poNo = po.OrderNum
 		}
 	}
 	return s.prRepo.UpdateAmounts(ctx, prID, poAmount, hpp, poNo)
@@ -446,7 +466,10 @@ func (s *PRService) EvaluatePaymentCompletion(ctx context.Context, prID int, adm
 	}
 
 	total := 0
-	for _, c := range counts {
+	for status, c := range counts {
+		if status == "cancelled" {
+			continue
+		}
 		total += c
 	}
 	if total == 0 {
