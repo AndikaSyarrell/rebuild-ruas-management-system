@@ -526,6 +526,8 @@ func (h *POHandler) LinkQuotation(w http.ResponseWriter, r *http.Request) {
 		utils.Error(w, http.StatusConflict, "Quotation ini sudah ter-link ke PO lain")
 	case errors.Is(err, service.ErrQuotationNotEligible):
 		utils.Error(w, http.StatusConflict, "Belum ada purchase request anggota grup quotation ini yang berstatus completed")
+	case errors.Is(err, service.ErrQuotationNotEligible):
+		utils.Error(w, http.StatusConflict, "Belum ada PR yang berstatus submitted, approved, atau completed didalam group quotation")
 	default:
 		utils.Error(w, http.StatusInternalServerError, "Gagal menautkan quotation ke PO")
 	}

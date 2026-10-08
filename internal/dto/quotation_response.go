@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"rms-backend/internal/models"
+	"rms-backend/internal/service"
 	"rms-backend/internal/repository"
 )
 
@@ -25,7 +26,7 @@ func NewQuotationCandidateResponse(c repository.QuotationCandidate) QuotationCan
 	eligible := false
 	for _, m := range c.Members {
 		members = append(members, QuotationMemberResponse{PRID: m.PRID, RfpNo: m.RfpNo, Status: m.Status})
-		if m.Status == "completed" {
+		if service.IsLinkablePRStatus(m.Status) {
 			eligible = true
 		}
 	}

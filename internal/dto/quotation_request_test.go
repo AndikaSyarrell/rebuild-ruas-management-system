@@ -23,16 +23,21 @@ func TestUnlinkQuotationRequest_RequiresNotes(t *testing.T) {
 	}
 }
 
-func TestQuotationCandidate_EligibleOnlyWhenAnyCompleted(t *testing.T) {
+func TestQuotationCandidate_EligibleOnlyWhenAnyLinkableStatus(t *testing.T) {
 	c := repository.QuotationCandidate{
 		Quotation: models.PRQuotation{ID: 1, No: "Q-1"},
-		Members:   []repository.QuotationMember{{PRID: 1, Status: "approved"}},
+		Members: []repository.QuotationMember{
+			{PRID: 1, Status: "draft"},
+			{PRID: 2, Status: "revision"},
+			{PRID: 3, Status: "rejected"},
+			{PRID: 4, Status: "cancelled"},
+		},
 	}
 	if NewQuotationCandidateResponse(c).Eligible {
-		t.Error("tanpa anggota completed tidak boleh eligible")
+		t.Error("tanpa anggota submitted/approved/completed tidak boleh eligible")
 	}
-	c.Members = append(c.Members, repository.QuotationMember{PRID: 2, Status: "completed"})
+	c.Members = append(c.Members, repository.QuotationMember{PRID: 5, Status: "submitted"})
 	if !NewQuotationCandidateResponse(c).Eligible {
-		t.Error("ada anggota completed harus eligible (BR-LINK-01)")
+		t.Error("ada anggota submitted harus eligible")
 	}
 }

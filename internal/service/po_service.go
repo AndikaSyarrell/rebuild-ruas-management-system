@@ -13,7 +13,7 @@ var (
 	// ErrPONotPrepared              = errors.New("po harus berstatus prepared sebelum dapat di-link ke quotation")
 	ErrPONotLinkable              = errors.New("po harus berstatus prepared, progress, atau complete sebelum dapat di-link ke quotation")
 	ErrQuotationAlreadyLinked     = errors.New("quotation ini sudah ter-link ke po lain")
-	ErrQuotationNotEligible       = errors.New("belum ada purchase request anggota grup quotation ini yang berstatus completed")
+	ErrQuotationNotEligible = errors.New("belum ada purchase request anggota grup quotation ini yang berstatus submitted, approved, atau completed")
 	ErrQuotationNotLinkedToThisPO = errors.New("quotation ini tidak ter-link ke po yang dimaksud")
 )
 
@@ -24,8 +24,10 @@ type POService struct {
 }
 
 var linkablePOStatuses = map[string]bool{"prepared": true, "progress": true, "complete": true}
+var linkablePRStatues = map[string]bool{"submitted": true, "approved": true, "completed": true}
 
 func IsLinkablePOStatus(status string) bool { return linkablePOStatuses[status] }
+func IsLinkablePRStatus(status string) bool { return linkablePRStatues[status]}
 
 func NewPOService(poRepo *repository.PORepo, quotationRepo *repository.PRQuotationRepo, commentRepo *repository.PRCommentRepo) *POService {
 	return &POService{poRepo: poRepo, quotationRepo: quotationRepo, commentRepo: commentRepo}
@@ -82,11 +84,18 @@ func (s *POService) LinkQuotation(ctx context.Context, poID string, quotationID 
 		return ErrQuotationAlreadyLinked
 	}
 
-	hasCompleted, err := s.quotationRepo.HasCompletedMember(ctx, quotationID)
+	members, err := s.quotationRepo.MemberPRs(ctx, quotationID)
 	if err != nil {
 		return err
 	}
-	if !hasCompleted {
+	eligible := false
+	for _, m := range members {
+		if IsLinkablePRStatus(m.Status){
+			eligible = true
+			break
+		}
+	}
+	if !eligible {
 		return ErrQuotationNotEligible
 	}
 
