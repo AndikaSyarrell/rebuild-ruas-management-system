@@ -139,7 +139,6 @@ func (s *PRService) CheckQuotationPOLink(ctx context.Context, in LinkCheckInput)
 	case po != nil && !IsLinkablePOStatus(po.Status):
 		res.Level, res.Code = LinkLevelError, "po_not_linkable"
 		res.Message = fmt.Sprintf("PO %s berstatus %s. Nomor PO hanya dapat dipakai bila PO berstatus prepared, progress, atau complete.", po.OrderNum, po.Status)
-	// ... case linked_other_po dan linked_match tidak berubah ...
 	case po != nil && res.QuotationLinkedPO != nil && res.QuotationLinkedPO.ID != po.ID:
 		res.Level, res.Code = LinkLevelError, "linked_other_po"
 		res.Message = fmt.Sprintf("Quotation %s sudah ter-link ke PO %s, bukan PO %s.",
@@ -149,10 +148,10 @@ func (s *PRService) CheckQuotationPOLink(ctx context.Context, in LinkCheckInput)
 		res.Message = fmt.Sprintf("Quotation %s sudah ter-link ke PO %s.", norm, po.OrderNum)
 	case po != nil && norm != "":
 		res.Level, res.Code = LinkLevelWarning, "not_linked"
-		res.Message = fmt.Sprintf("Quotation %s belum ter-link ke PO %s. Link dilakukan dari halaman PO (status prepared) setelah ada PR completed di grup quotation ini.", norm, po.OrderNum)
+		res.Message = fmt.Sprintf("Quotation %s belum ter-link ke PO %s. Nomor PO tetap disimpan pada PR ini; link grup quotation dilakukan dari tab Quotation pada halaman PO (status prepared, progress, atau complete) setelah ada PR berstatus submitted, approved, atau completed di grup ini.", norm, po.OrderNum)
 	case po != nil:
 		res.Level, res.Code = LinkLevelInfo, "po_only"
-		res.Message = fmt.Sprintf("Isi nomor quotation untuk memeriksa link ke PO %s.", po.OrderNum)
+		res.Message = fmt.Sprintf("Nomor PO %s akan disimpan pada PR ini. Isi nomor quotation bila PR ini bagian dari grup quotation.", po.OrderNum)
 	case res.QuotationLinkedPO != nil:
 		res.Level, res.Code = LinkLevelOK, "quotation_linked"
 		res.Message = fmt.Sprintf("Quotation %s ter-link ke PO %s, nomor PO diisi otomatis.", norm, res.QuotationLinkedPO.OrderNum)
