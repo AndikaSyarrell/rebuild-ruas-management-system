@@ -29,11 +29,17 @@ func NewRegionResponseList(list []models.Region) []RegionResponse {
 type DivisionResponse struct {
 	ID         int    `json:"division_id"`
 	Title      string `json:"division_title"`
+	Code       string `json:"division_code"`
 	CreateDate string `json:"created_at"`
 }
 
 func NewDivisionResponse(m models.Division) DivisionResponse {
-	return DivisionResponse{ID: m.ID, Title: m.Title, CreateDate: m.CreatedAt.Format(time.RFC3339)}
+	return DivisionResponse{
+		ID:         m.ID,
+		Title:      m.Title,
+		Code:       m.Code,
+		CreateDate: m.CreatedAt.Format(time.RFC3339),
+	}
 }
 
 func NewDivisionResponseList(list []models.Division) []DivisionResponse {

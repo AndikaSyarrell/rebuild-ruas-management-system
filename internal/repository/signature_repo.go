@@ -77,6 +77,14 @@ func (r *AdminSignatureRepo) Create(ctx context.Context, adminID, namePic, fileP
 	return res.LastInsertId()
 }
 
+func (r *AdminSignatureRepo) Update(ctx context.Context, id int, namePic, filePath string) error {
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE T_Admin_Signature
+		SET signature_name_pic = ?, signature_file = ?, signature_modify_date = NOW()
+		WHERE signature_id = ?`, namePic, filePath, id)
+	return err
+}
+
 func (r *AdminSignatureRepo) Delete(ctx context.Context, id int) error {
 	_, err := r.db.ExecContext(ctx, `DELETE FROM T_Admin_Signature WHERE signature_id = ?`, id)
 	return err

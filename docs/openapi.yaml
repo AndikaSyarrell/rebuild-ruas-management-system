@@ -415,7 +415,7 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/TitleRequest" }
+            schema: { $ref: "#/components/schemas/DivisionRequest" }
       responses:
         "201":
           $ref: "#/components/responses/Created"
@@ -467,7 +467,7 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/TitleRequest" }
+            schema: { $ref: "#/components/schemas/DivisionRequest" }
       responses:
         "200":
           $ref: "#/components/responses/OK"
@@ -3864,6 +3864,13 @@ components:
       properties:
         title: { type: string }
 
+    DivisionRequest:
+      type: object
+      required: [title, code]
+      properties:
+        title: { type: string }
+        code: { type: string, example: "WH" }
+
     RegionResponse:
       type: object
       properties:
@@ -3876,6 +3883,7 @@ components:
       properties:
         division_id: { type: integer }
         division_title: { type: string }
+        division_code: { type: string }
         created_at: { type: string, format: date-time }
 
     UnitResponse:
