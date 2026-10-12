@@ -10,6 +10,7 @@ import (
 	"time"
 	"database/sql"
 	"errors"
+	"mime"
 
 	"rms-backend/internal/repository"
 	"rms-backend/internal/utils"
@@ -49,6 +50,45 @@ func (h *SignatureHandler) Mine(w http.ResponseWriter, r *http.Request) {
 	utils.OK(w, "Fetch success", map[string]any{
 		"signature_id": sig.ID, "signature_file": sig.File, "signature_name_pic": sig.NamePic,
 	})
+}
+
+func (h *SignatureHandler) File(w http.ResponseWriter, r *http.Request){
+	adminID, ok := actorFromContext(r.Context())
+	if !ok {
+		utils.Error(w, http.StatusUnauthorized, "tidak terauntentikasi")
+		return
+	}
+
+	sig, err := h.repo.GetLatestByAdmin(r.Context(), adminID)
+	if errors.Is(err, sql.ErrNoRows){
+		utils.Error(w, http.StatusNotFound, "tanda tangan tidak ditemukan")
+		return
+	}
+	if err != nil{
+		utils.Error(w, http.StatusInternalServerError, "gagal mengambil data, kesalahan server")
+		return
+	}
+	
+	f, err := os.Open(filepath.Join(h.uploadDir, "..", sig.File))
+	if err != nil{
+		utils.Error(w, http.StatusInternalServerError, "tanda tangan tidak ditemukan diserver")
+		return
+	}
+
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil || fi.Size() == 0 {
+		utils.Error(w, http.StatusInternalServerError, "file tanda tangan tidak ditemukan atau rusak")
+		return
+	}
+
+	ct := mime.TypeByExtension(strings.ToLower(filepath.Ext(sig.File)))
+	if ct == "" {
+		ct = "imge/png"
+	}
+	w.Header().Set("Content-Type", ct)
+	w.Header().Set("Cache-Control", "private, no-store")
+	http.ServeContent(w, r, "", fi.ModTime(), f)
 }
 
 // POST /api/admins/me/signature (multipart/form-data: file, name_pic)

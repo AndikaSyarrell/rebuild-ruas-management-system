@@ -219,6 +219,7 @@ func New(d *Dependencies) http.Handler {
 			rt.Get("/checkers", d.AdminHandler.ListCheckers)
 			rt.Get("/{id}", d.AdminHandler.Detail)
 			rt.Get("/me/signature", d.SignatureHandler.Mine)
+			rt.Get("/me/signature/file", d.SignatureHandler.File)
 			rt.Post("/me/signature", d.SignatureHandler.Upload)
 			rt.With(requireAccess("create_new_admin")).Post("/", d.AdminHandler.Create)
 			rt.With(requireAccess("edit_other_admin")).Put("/{id}", d.AdminHandler.Update)
