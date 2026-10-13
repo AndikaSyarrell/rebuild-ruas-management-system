@@ -58,7 +58,7 @@ func (h *DivisionHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	req.Normalize()
 	if err := req.Validate(); err != nil {
-		utils.Error(w, http.StatusBadRequest, "Judul divisi wajib diisi")
+		utils.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	id, err := h.repo.Create(r.Context(), req.Title, req.Code)
@@ -81,7 +81,7 @@ func (h *DivisionHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	req.Normalize()
 	if err := req.Validate(); err != nil {
-		utils.Error(w, http.StatusBadRequest, "Judul divisi wajib diisi")
+		utils.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if err := h.repo.Update(r.Context(), id, req.Title, req.Code); err != nil {
